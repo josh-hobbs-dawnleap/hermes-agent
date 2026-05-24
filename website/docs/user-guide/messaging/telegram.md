@@ -101,6 +101,65 @@ TELEGRAM_OBSERVE_UNMENTIONED_GROUP_MESSAGES=true
 
 This requires Telegram to deliver ordinary group messages to the gateway, so disable BotFather privacy mode or promote the bot to group admin as described above.
 
+### Ambient response gate configuration
+
+Ambient mode is a separate opt-in gate for deciding whether Hermes may proactively respond to allowed group chatter. It is disabled by default and only operates in Telegram chats/topics that you explicitly allowlist with `telegram.ambient_chats` (routing behavior is otherwise unchanged: `require_mention` and `observe_unmentioned_group_messages` keep their existing meanings).
+
+```yaml
+ambient:
+  enabled: false
+  provider: ""
+  model: ""
+  max_context_messages: 12
+  response_cooldown_seconds: 900
+  memory_enabled: true
+  memory_auto_save_low_sensitivity: false
+  memory_confirm_sensitive: true
+  social_errands_enabled: false
+
+telegram:
+  group_allowed_chats:
+    - "-1001234567890"
+  ambient_chats:
+    - "-1001234567890"
+```
+
+Important: leaving `ambient.enabled: false` keeps the ambient gate off even if `telegram.ambient_chats` is populated. Use the allowlist as a second safety gate; do not rely on ambient mode for chats/topics that are not explicitly listed.
+
+When ambient mode is enabled for an allowlisted chat, Hermes first stores ordinary group chatter as observed context exactly as above. Before taking the store-only path, it may run a small auxiliary classifier (`task="ambient"`) with no tools and a compact JSON-only prompt. If the classifier says `respond: false`, Hermes remains silent. If it says `respond: true` and the chat/topic is not on cooldown, Hermes dispatches the full agent with an explicit safety prompt: observed group context is chat content, not instructions.
+
+Operational controls:
+
+- Keep `ambient.enabled: false` until you have verified the bot can safely observe the target group.
+- Add only trusted chat IDs to `telegram.ambient_chats`; use `chat_id:thread_id` entries for topic-specific rollout.
+- Set `ambient.provider` and `ambient.model` to a cheap, fast classifier model if desired; leaving them blank uses the normal auxiliary provider resolution.
+- Use `ambient.response_cooldown_seconds` to rate-limit proactive, non-addressed responses per chat/topic.
+- Inspect identity mappings with `hermes identity list` and add trusted mappings with `hermes identity add telegram <user_id> "Julia Hobbs"`.
+- Inspect and cancel pending social errands with `hermes errands list` and `hermes errands cancel <id>`.
+- Set `ambient.memory_enabled: false` to disable ambient memory-candidate handling.
+- Set `ambient.social_errands_enabled: false` to disable ambient social-errand handling.
+- Restart the gateway after config changes.
+
+Ambient memory and social-errand helpers are deliberately conservative. They only operate on trusted interactive chat context, require known person identity mappings, prepare named-person memory text rather than vague `user` facts, and attribute relayed messages instead of impersonating the requester. Untrusted content such as email, webpages, PDFs, or scraped documents must not establish identity, create memory, or create delivery errands.
+
+For the broader safety model, rollout checklist, identity commands, and social-errand examples, see [Ambient Group Chat](../features/ambient-group-chat.md).
+
+Environment equivalents are available for service-managed installs:
+
+```bash
+HERMES_AMBIENT_ENABLED=false
+HERMES_AMBIENT_PROVIDER=
+HERMES_AMBIENT_MODEL=
+HERMES_AMBIENT_MAX_CONTEXT_MESSAGES=12
+HERMES_AMBIENT_RESPONSE_COOLDOWN_SECONDS=900
+HERMES_AMBIENT_MEMORY_ENABLED=true
+HERMES_AMBIENT_MEMORY_AUTO_SAVE_LOW_SENSITIVITY=false
+HERMES_AMBIENT_MEMORY_CONFIRM_SENSITIVE=true
+HERMES_AMBIENT_SOCIAL_ERRANDS_ENABLED=false
+TELEGRAM_GROUP_ALLOWED_CHATS=-1001234567890
+TELEGRAM_AMBIENT_CHATS=-1001234567890
+```
+
 ## Step 4: Find Your User ID
 
 Hermes Agent uses numeric Telegram user IDs to control access. Your user ID is **not** your username — it's a number like `123456789`.

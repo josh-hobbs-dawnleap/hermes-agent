@@ -132,6 +132,11 @@ _EXTRA_ENV_KEYS = frozenset({
     "MATRIX_PASSWORD", "MATRIX_ENCRYPTION", "MATRIX_DEVICE_ID", "MATRIX_HOME_ROOM",
     "MATRIX_REQUIRE_MENTION", "MATRIX_FREE_RESPONSE_ROOMS", "MATRIX_AUTO_THREAD", "MATRIX_DM_AUTO_THREAD",
     "MATRIX_RECOVERY_KEY",
+    "HERMES_AMBIENT_ENABLED", "HERMES_AMBIENT_PROVIDER", "HERMES_AMBIENT_MODEL",
+    "HERMES_AMBIENT_MAX_CONTEXT_MESSAGES", "HERMES_AMBIENT_RESPONSE_COOLDOWN_SECONDS",
+    "HERMES_AMBIENT_MEMORY_ENABLED", "HERMES_AMBIENT_MEMORY_AUTO_SAVE_LOW_SENSITIVITY",
+    "HERMES_AMBIENT_MEMORY_CONFIRM_SENSITIVE", "HERMES_AMBIENT_SOCIAL_ERRANDS_ENABLED",
+    "TELEGRAM_AMBIENT_CHATS",
     # Langfuse observability plugin — optional tuning keys + standard SDK vars.
     # Activation is via plugins.enabled (opt-in through `hermes plugins enable
     # observability/langfuse`); credentials gate the plugin at runtime.
@@ -506,6 +511,19 @@ DEFAULT_CONFIG = {
     "fallback_providers": [],
     "credential_pool_strategies": {},
     "toolsets": ["hermes-cli"],
+    # Ambient gate configuration. Defaults are intentionally off; Telegram
+    # ambient operation is further limited by telegram.ambient_chats/topics.
+    "ambient": {
+        "enabled": False,
+        "provider": "",
+        "model": "",
+        "max_context_messages": 12,
+        "response_cooldown_seconds": 900,
+        "memory_enabled": True,
+        "memory_auto_save_low_sensitivity": False,
+        "memory_confirm_sensitive": True,
+        "social_errands_enabled": False,
+    },
     "agent": {
         "max_turns": 90,
         # Inactivity timeout for gateway agent execution (seconds).
@@ -1397,6 +1415,7 @@ DEFAULT_CONFIG = {
         "reactions": False,            # Add 👀/✅/❌ reactions to messages during processing
         "channel_prompts": {},         # Per-chat/topic ephemeral system prompts (topics inherit from parent group)
         "allowed_chats": "",           # If set, bot ONLY responds in these group/supergroup chat IDs (whitelist)
+        "ambient_chats": [],           # Chat/topic IDs explicitly allowlisted for ambient gate operation
     },
 
     # Mattermost platform settings (gateway mode)

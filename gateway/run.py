@@ -5897,6 +5897,7 @@ class GatewayRunner:
             if platform_registry.is_registered(platform.value):
                 adapter = platform_registry.create_adapter(platform.value, config)
                 if adapter is not None:
+                    setattr(adapter, "_gateway_config", self.config)
                     return adapter
                 # Registered but failed to instantiate — don't silently fall
                 # through to built-ins (there are none for plugin platforms).
@@ -5937,6 +5938,7 @@ class GatewayRunner:
                 )
                 _notify_mode = "important"
             adapter._notifications_mode = _notify_mode
+            setattr(adapter, "_gateway_config", self.config)
             return adapter
         
         elif platform == Platform.DISCORD:
@@ -8435,6 +8437,7 @@ class GatewayRunner:
                 run_generation=run_generation,
                 event_message_id=self._reply_anchor_for_event(event),
                 channel_prompt=event.channel_prompt,
+                enabled_toolsets_override=event.enabled_toolsets,
             )
 
             # Stop persistent typing indicator now that the agent is done
@@ -15408,6 +15411,7 @@ class GatewayRunner:
         _interrupt_depth: int = 0,
         event_message_id: Optional[str] = None,
         channel_prompt: Optional[str] = None,
+        enabled_toolsets_override: Optional[List[str]] = None,
     ) -> Dict[str, Any]:
         """
         Run the agent with the given message and context.
@@ -15446,7 +15450,10 @@ class GatewayRunner:
         platform_key = _platform_config_key(source.platform)
 
         from hermes_cli.tools_config import _get_platform_tools
-        enabled_toolsets = sorted(_get_platform_tools(user_config, platform_key))
+        if enabled_toolsets_override is None:
+            enabled_toolsets = sorted(_get_platform_tools(user_config, platform_key))
+        else:
+            enabled_toolsets = sorted(str(toolset) for toolset in enabled_toolsets_override)
         agent_cfg_local = user_config.get("agent") or {}
         disabled_toolsets = agent_cfg_local.get("disabled_toolsets") or None
 

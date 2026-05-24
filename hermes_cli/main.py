@@ -10580,7 +10580,7 @@ _BUILTIN_SUBCOMMANDS = frozenset(
         "acp", "auth", "backup", "bundles", "checkpoints", "claw", "completion",
         "computer-use",
         "config", "cron", "curator", "dashboard", "debug", "doctor",
-        "dump", "fallback", "gateway", "hooks", "import", "insights",
+        "dump", "errands", "fallback", "gateway", "hooks", "identity", "import", "insights",
         "kanban", "login", "logout", "logs", "lsp", "mcp", "memory", "migrate",
         "model", "pairing", "plugins", "postinstall", "profile", "proxy",
         "send", "sessions", "setup",
@@ -11389,6 +11389,15 @@ def main():
     # =========================================================================
     from hermes_cli.send_cmd import register_send_subparser
     register_send_subparser(subparsers)
+
+    # =========================================================================
+    # identity / errands commands — ambient social-assistant operator controls
+    # =========================================================================
+    from hermes_cli.identity_cmd import register_identity_subparser
+    from hermes_cli.errands_cmd import register_errands_subparser
+
+    register_identity_subparser(subparsers)
+    register_errands_subparser(subparsers)
 
     # =========================================================================
     # login command

@@ -981,6 +981,12 @@ class MessageEvent:
     # Applied at API call time and never persisted to transcript history.
     channel_prompt: Optional[str] = None
 
+    # Optional per-event toolset override.  Ambient observation wakeups use an
+    # empty list here so classifier-approved group chatter can receive a brief
+    # conversational answer without granting the full side-effect-capable tool
+    # surface to an unmentioned message.
+    enabled_toolsets: Optional[List[str]] = None
+
     # Channel context recovered by history backfill (e.g. messages between
     # bot turns that were missed due to require_mention).  Kept separate
     # from ``text`` so the sender-prefix logic in run.py can operate on the

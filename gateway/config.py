@@ -56,6 +56,17 @@ def _coerce_int(value: Any, default: int) -> int:
         return default
 
 
+def _coerce_str_list(value: Any) -> List[str]:
+    """Coerce YAML/env list-ish values to a list of non-empty strings."""
+    if value is None:
+        return []
+    if isinstance(value, (list, tuple, set)):
+        items = value
+    else:
+        items = str(value).split(",")
+    return [str(item).strip() for item in items if str(item).strip()]
+
+
 def _normalize_unauthorized_dm_behavior(value: Any, default: str = "pair") -> str:
     """Normalize unauthorized DM behavior to a supported value."""
     if isinstance(value, str):
@@ -447,6 +458,52 @@ _PLATFORM_CONNECTED_CHECKERS: dict[Platform, Callable[[PlatformConfig], bool]] =
 
 
 @dataclass
+class AmbientConfig:
+    """Configuration for the ambient response gate."""
+
+    enabled: bool = False
+    provider: str = ""
+    model: str = ""
+    max_context_messages: int = 12
+    response_cooldown_seconds: int = 900
+    memory_enabled: bool = True
+    memory_auto_save_low_sensitivity: bool = False
+    memory_confirm_sensitive: bool = True
+    social_errands_enabled: bool = False
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "enabled": self.enabled,
+            "provider": self.provider,
+            "model": self.model,
+            "max_context_messages": self.max_context_messages,
+            "response_cooldown_seconds": self.response_cooldown_seconds,
+            "memory_enabled": self.memory_enabled,
+            "memory_auto_save_low_sensitivity": self.memory_auto_save_low_sensitivity,
+            "memory_confirm_sensitive": self.memory_confirm_sensitive,
+            "social_errands_enabled": self.social_errands_enabled,
+        }
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> "AmbientConfig":
+        if not isinstance(data, dict):
+            data = {}
+        return cls(
+            enabled=_coerce_bool(data.get("enabled"), False),
+            provider=str(data.get("provider") or ""),
+            model=str(data.get("model") or ""),
+            max_context_messages=max(_coerce_int(data.get("max_context_messages"), 12), 0),
+            response_cooldown_seconds=max(_coerce_int(data.get("response_cooldown_seconds"), 900), 0),
+            memory_enabled=_coerce_bool(data.get("memory_enabled"), True),
+            memory_auto_save_low_sensitivity=_coerce_bool(
+                data.get("memory_auto_save_low_sensitivity"), False
+            ),
+            memory_confirm_sensitive=_coerce_bool(data.get("memory_confirm_sensitive"), True),
+            social_errands_enabled=_coerce_bool(data.get("social_errands_enabled"), False),
+        )
+
+
+@dataclass
 class GatewayConfig:
     """
     Main gateway configuration.
@@ -485,6 +542,9 @@ class GatewayConfig:
 
     # Streaming configuration
     streaming: StreamingConfig = field(default_factory=StreamingConfig)
+
+    # Ambient response-gate configuration (off by default).
+    ambient: AmbientConfig = field(default_factory=AmbientConfig)
 
     # Session store pruning: drop SessionEntry records older than this many
     # days from the in-memory dict and sessions.json.  Keeps the store from
@@ -585,6 +645,7 @@ class GatewayConfig:
             "thread_sessions_per_user": self.thread_sessions_per_user,
             "unauthorized_dm_behavior": self.unauthorized_dm_behavior,
             "streaming": self.streaming.to_dict(),
+            "ambient": self.ambient.to_dict(),
             "session_store_max_age_days": self.session_store_max_age_days,
         }
     
@@ -653,6 +714,7 @@ class GatewayConfig:
             thread_sessions_per_user=_coerce_bool(thread_sessions_per_user, False),
             unauthorized_dm_behavior=unauthorized_dm_behavior,
             streaming=StreamingConfig.from_dict(data.get("streaming", {})),
+            ambient=AmbientConfig.from_dict(data.get("ambient", {})),
             session_store_max_age_days=session_store_max_age_days,
         )
 
@@ -749,6 +811,12 @@ def load_gateway_config() -> GatewayConfig:
             if isinstance(streaming_cfg, dict):
                 gw_data["streaming"] = streaming_cfg
 
+            ambient_cfg = yaml_cfg.get("ambient")
+            if not isinstance(ambient_cfg, dict):
+                ambient_cfg = yaml_cfg.get("gateway", {}).get("ambient")
+            if isinstance(ambient_cfg, dict):
+                gw_data["ambient"] = ambient_cfg
+
             if "reset_triggers" in yaml_cfg:
                 gw_data["reset_triggers"] = yaml_cfg["reset_triggers"]
 
@@ -842,6 +910,8 @@ def load_gateway_config() -> GatewayConfig:
                     bridged["exclusive_bot_mentions"] = platform_cfg["exclusive_bot_mentions"]
                 if plat == Platform.TELEGRAM and "observe_unmentioned_group_messages" in platform_cfg:
                     bridged["observe_unmentioned_group_messages"] = platform_cfg["observe_unmentioned_group_messages"]
+                if plat == Platform.TELEGRAM and "ambient_chats" in platform_cfg:
+                    bridged["ambient_chats"] = _coerce_str_list(platform_cfg["ambient_chats"])
                 if "dm_policy" in platform_cfg:
                     bridged["dm_policy"] = platform_cfg["dm_policy"]
                 if "allow_from" in platform_cfg:
@@ -1288,7 +1358,40 @@ def _validate_gateway_config(config: "GatewayConfig") -> None:
 
 def _apply_env_overrides(config: GatewayConfig) -> None:
     """Apply environment variable overrides to config."""
-    
+    _ambient_env_map = {
+        "HERMES_AMBIENT_ENABLED": ("enabled", lambda value: _coerce_bool(value, config.ambient.enabled)),
+        "HERMES_AMBIENT_PROVIDER": ("provider", str),
+        "HERMES_AMBIENT_MODEL": ("model", str),
+        "HERMES_AMBIENT_MAX_CONTEXT_MESSAGES": (
+            "max_context_messages",
+            lambda value: max(_coerce_int(value, config.ambient.max_context_messages), 0),
+        ),
+        "HERMES_AMBIENT_RESPONSE_COOLDOWN_SECONDS": (
+            "response_cooldown_seconds",
+            lambda value: max(_coerce_int(value, config.ambient.response_cooldown_seconds), 0),
+        ),
+        "HERMES_AMBIENT_MEMORY_ENABLED": (
+            "memory_enabled",
+            lambda value: _coerce_bool(value, config.ambient.memory_enabled),
+        ),
+        "HERMES_AMBIENT_MEMORY_AUTO_SAVE_LOW_SENSITIVITY": (
+            "memory_auto_save_low_sensitivity",
+            lambda value: _coerce_bool(value, config.ambient.memory_auto_save_low_sensitivity),
+        ),
+        "HERMES_AMBIENT_MEMORY_CONFIRM_SENSITIVE": (
+            "memory_confirm_sensitive",
+            lambda value: _coerce_bool(value, config.ambient.memory_confirm_sensitive),
+        ),
+        "HERMES_AMBIENT_SOCIAL_ERRANDS_ENABLED": (
+            "social_errands_enabled",
+            lambda value: _coerce_bool(value, config.ambient.social_errands_enabled),
+        ),
+    }
+    for env_name, (attr, coerce) in _ambient_env_map.items():
+        raw = os.getenv(env_name)
+        if raw is not None:
+            setattr(config.ambient, attr, coerce(raw))
+
     # Telegram
     telegram_token = os.getenv("TELEGRAM_BOT_TOKEN")
     if telegram_token:
@@ -1311,6 +1414,14 @@ def _apply_env_overrides(config: GatewayConfig) -> None:
         config.platforms[Platform.TELEGRAM].extra["fallback_ips"] = [
             ip.strip() for ip in telegram_fallback_ips.split(",") if ip.strip()
         ]
+
+    telegram_ambient_chats = os.getenv("TELEGRAM_AMBIENT_CHATS")
+    if telegram_ambient_chats is not None:
+        if Platform.TELEGRAM not in config.platforms:
+            config.platforms[Platform.TELEGRAM] = PlatformConfig()
+        config.platforms[Platform.TELEGRAM].extra["ambient_chats"] = _coerce_str_list(
+            telegram_ambient_chats
+        )
 
     telegram_home = os.getenv("TELEGRAM_HOME_CHANNEL")
     if telegram_home and Platform.TELEGRAM in config.platforms:

@@ -61,6 +61,7 @@ const sidebars: SidebarsConfig = {
             'user-guide/features/lsp',
             'user-guide/features/curator',
             'user-guide/features/memory',
+            'user-guide/features/ambient-group-chat',
             'user-guide/features/memory-providers',
             'user-guide/features/context-files',
             'user-guide/features/context-references',

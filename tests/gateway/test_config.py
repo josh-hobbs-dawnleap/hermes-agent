@@ -4,6 +4,7 @@ import os
 from unittest.mock import patch
 
 from gateway.config import (
+    AmbientConfig,
     GatewayConfig,
     HomeChannel,
     Platform,
@@ -185,6 +186,47 @@ class TestStreamingConfig:
         assert restored.fresh_final_after_seconds == 60.0
 
 
+class TestAmbientConfig:
+    def test_defaults_are_off_and_safe(self):
+        cfg = AmbientConfig()
+
+        assert cfg.enabled is False
+        assert cfg.provider == ""
+        assert cfg.model == ""
+        assert cfg.max_context_messages == 12
+        assert cfg.response_cooldown_seconds == 900
+        assert cfg.memory_enabled is True
+        assert cfg.memory_auto_save_low_sensitivity is False
+        assert cfg.memory_confirm_sensitive is True
+        assert cfg.social_errands_enabled is False
+
+    def test_roundtrip_coerces_values(self):
+        restored = AmbientConfig.from_dict(
+            {
+                "enabled": "true",
+                "provider": "openrouter",
+                "model": "nous/hermes",
+                "max_context_messages": "24",
+                "response_cooldown_seconds": "60",
+                "memory_enabled": "false",
+                "memory_auto_save_low_sensitivity": "false",
+                "memory_confirm_sensitive": "false",
+                "social_errands_enabled": "false",
+            }
+        )
+
+        assert restored.enabled is True
+        assert restored.provider == "openrouter"
+        assert restored.model == "nous/hermes"
+        assert restored.max_context_messages == 24
+        assert restored.response_cooldown_seconds == 60
+        assert restored.memory_enabled is False
+        assert restored.memory_auto_save_low_sensitivity is False
+        assert restored.memory_confirm_sensitive is False
+        assert restored.social_errands_enabled is False
+        assert AmbientConfig.from_dict(restored.to_dict()) == restored
+
+
 class TestGatewayConfigRoundtrip:
     def test_full_roundtrip(self):
         config = GatewayConfig(
@@ -209,6 +251,17 @@ class TestGatewayConfigRoundtrip:
         assert restored.quick_commands == {"limits": {"type": "exec", "command": "echo ok"}}
         assert restored.group_sessions_per_user is False
         assert restored.thread_sessions_per_user is True
+
+    def test_roundtrip_preserves_ambient_config(self):
+        config = GatewayConfig(
+            ambient=AmbientConfig(enabled=True, provider="openrouter", model="nous/hermes")
+        )
+
+        restored = GatewayConfig.from_dict(config.to_dict())
+
+        assert restored.ambient.enabled is True
+        assert restored.ambient.provider == "openrouter"
+        assert restored.ambient.model == "nous/hermes"
 
     def test_roundtrip_preserves_unauthorized_dm_behavior(self):
         config = GatewayConfig(
@@ -622,6 +675,71 @@ class TestLoadGatewayConfig:
 
         import os
         assert os.environ.get("TELEGRAM_PROXY") == "socks5://from-env:1080"
+
+    def test_bridges_ambient_and_telegram_ambient_chats_from_config_yaml(self, tmp_path, monkeypatch):
+        hermes_home = tmp_path / ".hermes"
+        hermes_home.mkdir()
+        config_path = hermes_home / "config.yaml"
+        config_path.write_text(
+            "ambient:\n"
+            "  enabled: true\n"
+            "  provider: openrouter\n"
+            "  model: nous/hermes\n"
+            "  max_context_messages: 8\n"
+            "  response_cooldown_seconds: 120\n"
+            "  memory_enabled: false\n"
+            "  memory_auto_save_low_sensitivity: false\n"
+            "  memory_confirm_sensitive: false\n"
+            "  social_errands_enabled: false\n"
+            "telegram:\n"
+            "  ambient_chats:\n"
+            "    - \"-1001234567890\"\n",
+            encoding="utf-8",
+        )
+
+        monkeypatch.setenv("HERMES_HOME", str(hermes_home))
+
+        config = load_gateway_config()
+
+        assert config.ambient.enabled is True
+        assert config.ambient.provider == "openrouter"
+        assert config.ambient.model == "nous/hermes"
+        assert config.ambient.max_context_messages == 8
+        assert config.ambient.response_cooldown_seconds == 120
+        assert config.ambient.memory_enabled is False
+        assert config.ambient.memory_auto_save_low_sensitivity is False
+        assert config.ambient.memory_confirm_sensitive is False
+        assert config.ambient.social_errands_enabled is False
+        assert config.platforms[Platform.TELEGRAM].extra["ambient_chats"] == ["-1001234567890"]
+
+    def test_ambient_env_overrides_yaml_without_enabling_by_default(self, tmp_path, monkeypatch):
+        hermes_home = tmp_path / ".hermes"
+        hermes_home.mkdir()
+        (hermes_home / "config.yaml").write_text(
+            "ambient:\n"
+            "  enabled: false\n"
+            "  provider: yaml-provider\n"
+            "telegram:\n"
+            "  ambient_chats:\n"
+            "    - yaml-chat\n",
+            encoding="utf-8",
+        )
+
+        monkeypatch.setenv("HERMES_HOME", str(hermes_home))
+        monkeypatch.setenv("HERMES_AMBIENT_PROVIDER", "env-provider")
+        monkeypatch.setenv("HERMES_AMBIENT_MAX_CONTEXT_MESSAGES", "5")
+        monkeypatch.setenv("TELEGRAM_AMBIENT_CHATS", "env-chat-1,env-chat-2")
+        monkeypatch.delenv("HERMES_AMBIENT_ENABLED", raising=False)
+
+        config = load_gateway_config()
+
+        assert config.ambient.enabled is False
+        assert config.ambient.provider == "env-provider"
+        assert config.ambient.max_context_messages == 5
+        assert config.platforms[Platform.TELEGRAM].extra["ambient_chats"] == [
+            "env-chat-1",
+            "env-chat-2",
+        ]
 
 
 class TestHomeChannelEnvOverrides:

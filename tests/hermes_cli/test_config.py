@@ -71,6 +71,23 @@ class TestLoadConfigDefaults:
             assert config["terminal"]["backend"] == "local"
             assert config["display"]["interim_assistant_messages"] is True
 
+    def test_ambient_defaults_are_off(self, tmp_path):
+        with patch.dict(os.environ, {"HERMES_HOME": str(tmp_path)}):
+            config = load_config()
+
+            assert config["ambient"] == {
+                "enabled": False,
+                "provider": "",
+                "model": "",
+                "max_context_messages": 12,
+                "response_cooldown_seconds": 900,
+                "memory_enabled": True,
+                "memory_auto_save_low_sensitivity": False,
+                "memory_confirm_sensitive": True,
+                "social_errands_enabled": False,
+            }
+            assert config["telegram"]["ambient_chats"] == []
+
     def test_legacy_root_level_max_turns_migrates_to_agent_config(self, tmp_path):
         with patch.dict(os.environ, {"HERMES_HOME": str(tmp_path)}):
             config_path = tmp_path / "config.yaml"
