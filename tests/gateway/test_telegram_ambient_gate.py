@@ -129,6 +129,53 @@ def test_ambient_gate_off_by_default_for_non_ambient_chat(monkeypatch):
     assert called is False
 
 
+def test_ambient_gate_can_auto_trust_authorized_sender_without_ambient_chat(monkeypatch):
+    adapter = _adapter(
+        {
+            "require_mention": True,
+            "observe_unmentioned_group_messages": True,
+            "auto_trust_groups_from_authorized_senders": True,
+            "auto_ambient_chats_from_authorized_senders": True,
+        }
+    )
+    adapter._is_callback_user_authorized = lambda user_id, **_kw: str(user_id) == "1"
+    monkeypatch.setattr(
+        "gateway.platforms.telegram.classify_ambient_message",
+        lambda **kwargs: SimpleNamespace(respond=True),
+    )
+
+    event = adapter._ambient_event_for_unmentioned_group_message(_message(chat_id=-333, user_id=1), MessageType.TEXT, update_id=1)
+
+    assert event is not None
+    assert event.source.chat_id == "-333"
+    assert event.source.user_id is None
+    assert event.channel_prompt is not None
+    assert "Ambient wake" in event.channel_prompt
+
+
+def test_ambient_gate_does_not_auto_trust_unknown_sender(monkeypatch):
+    adapter = _adapter(
+        {
+            "require_mention": True,
+            "observe_unmentioned_group_messages": True,
+            "auto_trust_groups_from_authorized_senders": True,
+            "auto_ambient_chats_from_authorized_senders": True,
+        }
+    )
+    adapter._is_callback_user_authorized = lambda user_id, **_kw: False
+    called = False
+
+    def fake_classifier(**kwargs):
+        nonlocal called
+        called = True
+        return SimpleNamespace(respond=True)
+
+    monkeypatch.setattr("gateway.platforms.telegram.classify_ambient_message", fake_classifier)
+
+    assert adapter._ambient_event_for_unmentioned_group_message(_message(chat_id=-333, user_id=2), MessageType.TEXT, update_id=1) is None
+    assert called is False
+
+
 def test_ambient_gate_supports_chat_topic_allowlist(monkeypatch):
     adapter = _adapter(
         {

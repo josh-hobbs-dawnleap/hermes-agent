@@ -21,6 +21,9 @@ def _make_adapter(
     group_allowed_chats=None,
     guest_mode=None,
     observe_unmentioned_group_messages=None,
+    auto_trust_groups_from_authorized_senders=None,
+    auto_ambient_chats_from_authorized_senders=None,
+    callback_user_authorized=None,
     bot_username="hermes_bot",
 ):
     from gateway.platforms.telegram import TelegramAdapter
@@ -62,6 +65,10 @@ def _make_adapter(
         extra["guest_mode"] = guest_mode
     if observe_unmentioned_group_messages is not None:
         extra["observe_unmentioned_group_messages"] = observe_unmentioned_group_messages
+    if auto_trust_groups_from_authorized_senders is not None:
+        extra["auto_trust_groups_from_authorized_senders"] = auto_trust_groups_from_authorized_senders
+    if auto_ambient_chats_from_authorized_senders is not None:
+        extra["auto_ambient_chats_from_authorized_senders"] = auto_ambient_chats_from_authorized_senders
 
     adapter = object.__new__(TelegramAdapter)
     adapter.platform = Platform.TELEGRAM
@@ -78,10 +85,9 @@ def _make_adapter(
     adapter._active_sessions = {}
     adapter._pending_messages = {}
     # Trigger-gating tests don't exercise the allowlist gate (added by
-    # #23795 + #24468).  Force-authorize all senders so the trigger logic
-    # under test runs.  Without this, every fake message hits the new
-    # fail-closed auth path and gets dropped before trigger evaluation.
-    adapter._is_callback_user_authorized = lambda user_id, **_kw: True
+    # #23795 + #24468).  Force-authorize all senders by default so the
+    # trigger logic under test runs.  Tests for auto-trust can override this.
+    adapter._is_callback_user_authorized = callback_user_authorized or (lambda user_id, **_kw: True)
     return adapter
 
 
@@ -246,6 +252,81 @@ def test_unmentioned_group_observe_requires_chat_allowlist_for_shared_context():
         assert store.messages == []
 
     asyncio.run(_run())
+
+
+def test_authorized_sender_can_auto_trust_group_for_observed_context():
+    async def _run():
+        adapter = _make_adapter(
+            require_mention=True,
+            observe_unmentioned_group_messages=True,
+            auto_trust_groups_from_authorized_senders=True,
+            callback_user_authorized=lambda user_id, **_kw: str(user_id) == "111",
+        )
+        store = _FakeSessionStore()
+        adapter._session_store = store
+        update = SimpleNamespace(
+            update_id=1005,
+            message=_group_message("side chatter", chat_id=-333, from_user_id=111),
+            effective_message=None,
+        )
+
+        await adapter._handle_text_message(update, SimpleNamespace())
+
+        adapter._message_handler.assert_not_awaited()
+        assert len(store.messages) == 1
+        assert store.sources[0].chat_id == "-333"
+        assert store.sources[0].user_id is None
+        assert store.messages[0][1]["content"] == "[Alice Example|111]\nside chatter"
+
+    asyncio.run(_run())
+
+
+def test_unknown_sender_does_not_auto_trust_group_for_observed_context():
+    async def _run():
+        adapter = _make_adapter(
+            require_mention=True,
+            observe_unmentioned_group_messages=True,
+            auto_trust_groups_from_authorized_senders=True,
+            callback_user_authorized=lambda user_id, **_kw: False,
+        )
+        store = _FakeSessionStore()
+        adapter._session_store = store
+        update = SimpleNamespace(
+            update_id=1006,
+            message=_group_message("side chatter", chat_id=-333, from_user_id=444),
+            effective_message=None,
+        )
+
+        await adapter._handle_text_message(update, SimpleNamespace())
+
+        adapter._message_handler.assert_not_awaited()
+        assert store.messages == []
+
+    asyncio.run(_run())
+
+
+def test_authorized_sender_auto_trust_applies_triggered_group_attribution():
+    adapter = _make_adapter(
+        require_mention=True,
+        observe_unmentioned_group_messages=True,
+        auto_trust_groups_from_authorized_senders=True,
+        callback_user_authorized=lambda user_id, **_kw: str(user_id) == "222",
+    )
+    text = "@hermes_bot what did Alice say?"
+    msg = _group_message(
+        text,
+        chat_id=-333,
+        from_user_id=222,
+        from_user_name="Bob Example",
+        entities=[_mention_entity(text)],
+    )
+    event = adapter._build_message_event(msg, MessageType.TEXT, update_id=1007)
+    event = adapter._apply_telegram_group_observe_attribution(event)
+
+    assert event.source.chat_id == "-333"
+    assert event.source.user_id is None
+    assert event.text == "[Bob Example|222]\n@hermes_bot what did Alice say?"
+    assert "observed Telegram group context" in event.channel_prompt
 
 
 def test_shared_group_observe_source_is_authorized_by_group_allowed_chats(monkeypatch):
@@ -523,6 +604,8 @@ def test_config_bridges_telegram_group_settings(monkeypatch, tmp_path):
         "  guest_mode: true\n"
         "  exclusive_bot_mentions: true\n"
         "  observe_unmentioned_group_messages: true\n"
+        "  auto_trust_groups_from_authorized_senders: true\n"
+        "  auto_ambient_chats_from_authorized_senders: true\n"
         "  mention_patterns:\n"
         "    - \"^\\\\s*chompy\\\\b\"\n"
         "  free_response_chats:\n"
@@ -542,6 +625,8 @@ def test_config_bridges_telegram_group_settings(monkeypatch, tmp_path):
     monkeypatch.delenv("TELEGRAM_EXCLUSIVE_BOT_MENTIONS", raising=False)
     monkeypatch.delenv("TELEGRAM_GUEST_MODE", raising=False)
     monkeypatch.delenv("TELEGRAM_OBSERVE_UNMENTIONED_GROUP_MESSAGES", raising=False)
+    monkeypatch.delenv("TELEGRAM_AUTO_TRUST_GROUPS_FROM_AUTHORIZED_SENDERS", raising=False)
+    monkeypatch.delenv("TELEGRAM_AUTO_AMBIENT_CHATS_FROM_AUTHORIZED_SENDERS", raising=False)
     monkeypatch.delenv("TELEGRAM_FREE_RESPONSE_CHATS", raising=False)
     monkeypatch.delenv("TELEGRAM_ALLOWED_CHATS", raising=False)
     monkeypatch.delenv("TELEGRAM_GROUP_ALLOWED_CHATS", raising=False)
@@ -553,6 +638,8 @@ def test_config_bridges_telegram_group_settings(monkeypatch, tmp_path):
     assert __import__("os").environ["TELEGRAM_REQUIRE_MENTION"] == "true"
     assert __import__("os").environ["TELEGRAM_GUEST_MODE"] == "true"
     assert __import__("os").environ["TELEGRAM_OBSERVE_UNMENTIONED_GROUP_MESSAGES"] == "true"
+    assert __import__("os").environ["TELEGRAM_AUTO_TRUST_GROUPS_FROM_AUTHORIZED_SENDERS"] == "true"
+    assert __import__("os").environ["TELEGRAM_AUTO_AMBIENT_CHATS_FROM_AUTHORIZED_SENDERS"] == "true"
     assert __import__("os").environ["TELEGRAM_EXCLUSIVE_BOT_MENTIONS"] == "true"
     assert json.loads(__import__("os").environ["TELEGRAM_MENTION_PATTERNS"]) == [r"^\s*chompy\b"]
     assert __import__("os").environ["TELEGRAM_FREE_RESPONSE_CHATS"] == "-123"
@@ -567,6 +654,8 @@ def test_config_bridges_telegram_group_settings(monkeypatch, tmp_path):
     assert tg_cfg.extra.get("allowed_topics") == [8]
     assert tg_cfg.extra.get("exclusive_bot_mentions") is True
     assert tg_cfg.extra.get("observe_unmentioned_group_messages") is True
+    assert tg_cfg.extra.get("auto_trust_groups_from_authorized_senders") is True
+    assert tg_cfg.extra.get("auto_ambient_chats_from_authorized_senders") is True
 
 
 def test_config_bridges_telegram_user_allowlists(monkeypatch, tmp_path):

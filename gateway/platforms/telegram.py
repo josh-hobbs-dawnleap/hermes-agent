@@ -4251,6 +4251,69 @@ class TelegramAdapter(BasePlatformAdapter):
             return {str(part).strip() for part in raw if str(part).strip()}
         return {part.strip() for part in str(raw).split(",") if part.strip()}
 
+    def _telegram_auto_trust_groups_from_authorized_senders(self) -> bool:
+        """Return whether authorized Telegram senders may trust their current group at runtime.
+
+        This is intentionally sender-scoped rather than member-list scoped: Telegram
+        bots cannot reliably enumerate ordinary group members, so the safe auto
+        path is to accept/observe messages from already-authorized senders in the
+        current group without granting every group member blanket access.
+        """
+        configured = self.config.extra.get("auto_trust_groups_from_authorized_senders")
+        if configured is not None:
+            if isinstance(configured, str):
+                return configured.lower() in {"true", "1", "yes", "on"}
+            return bool(configured)
+        return os.getenv("TELEGRAM_AUTO_TRUST_GROUPS_FROM_AUTHORIZED_SENDERS", "false").lower() in {"true", "1", "yes", "on"}
+
+    def _telegram_auto_ambient_chats_from_authorized_senders(self) -> bool:
+        configured = self.config.extra.get("auto_ambient_chats_from_authorized_senders")
+        if configured is not None:
+            if isinstance(configured, str):
+                return configured.lower() in {"true", "1", "yes", "on"}
+            return bool(configured)
+        return os.getenv("TELEGRAM_AUTO_AMBIENT_CHATS_FROM_AUTHORIZED_SENDERS", "false").lower() in {"true", "1", "yes", "on"}
+
+    def _telegram_authorized_sender_auto_trusts_group(self, message: Message) -> bool:
+        """Return True when this group turn may be treated as operator-approved.
+
+        The sender must already be authorized through the normal Telegram user
+        allowlist/pairing path. Unknown senders are silent by default; this avoids
+        the tempting but unsafe fiction that a Telegram bot knows the full group
+        roster. A modest policy, perhaps, but modesty has saved more systems than
+        bravado.
+        """
+        if not self._telegram_auto_trust_groups_from_authorized_senders():
+            return False
+        if not self._is_group_chat(message):
+            return False
+        sender = getattr(message, "from_user", None)
+        user_id = str(getattr(sender, "id", "") or "").strip()
+        if not user_id or bool(getattr(sender, "is_bot", False)):
+            return False
+        chat = getattr(message, "chat", None)
+        chat_type = str(getattr(chat, "type", "group") or "group")
+        if chat_type == "supergroup":
+            chat_type = "forum" if getattr(message, "message_thread_id", None) is not None else "group"
+        user_name = (
+            getattr(sender, "full_name", None)
+            or getattr(sender, "username", None)
+            or getattr(sender, "first_name", None)
+        )
+        try:
+            return bool(
+                self._is_callback_user_authorized(
+                    user_id,
+                    chat_id=str(getattr(chat, "id", "") or ""),
+                    chat_type=chat_type,
+                    thread_id=getattr(message, "message_thread_id", None),
+                    user_name=str(user_name).strip() if user_name else None,
+                )
+            )
+        except Exception:
+            logger.debug("[%s] Telegram group auto-trust auth check failed", getattr(self, "name", "telegram"), exc_info=True)
+            return False
+
     def _telegram_observe_allowed_chats(self) -> set[str]:
         """Chats where observed group context may use a shared source.
 
@@ -4540,11 +4603,11 @@ class TelegramAdapter(BasePlatformAdapter):
 
         allowed = self._telegram_observe_allowed_chats()
         # Observed context is shared at chat/topic scope so a later trigger from
-        # another user can see it.  Require an explicit chat allowlist; that
-        # keeps shared observed history limited to operator-approved groups and
-        # lets gateway authorization pass even after the shared session source
-        # drops the per-sender user_id.
-        if not allowed or chat_id_str not in allowed:
+        # another user can see it.  Require an explicit chat allowlist or an
+        # already-authorized sender under the conservative auto-trust policy;
+        # Telegram cannot enumerate every group member, so auto-trust never
+        # turns into blanket authorization for unknown senders.
+        if chat_id_str not in allowed and not self._telegram_authorized_sender_auto_trusts_group(message):
             return False
 
         # Only observe messages skipped by the require_mention gate.  If the
@@ -4626,7 +4689,12 @@ class TelegramAdapter(BasePlatformAdapter):
         if not getattr(config, "enabled", False):
             return False
         ambient_chats = self._telegram_ambient_chats()
-        return bool(ambient_chats and ambient_chats.intersection(self._ambient_allowlist_keys_for_message(message)))
+        if ambient_chats and ambient_chats.intersection(self._ambient_allowlist_keys_for_message(message)):
+            return True
+        return (
+            self._telegram_auto_ambient_chats_from_authorized_senders()
+            and self._telegram_authorized_sender_auto_trusts_group(message)
+        )
 
     def _ambient_identity_summary(self, event: MessageEvent, sender_person: str | None) -> str:
         if not sender_person:
@@ -4762,7 +4830,7 @@ class TelegramAdapter(BasePlatformAdapter):
             return event
         chat_id_str = str(getattr(getattr(raw_message, "chat", None), "id", ""))
         allowed = self._telegram_observe_allowed_chats()
-        if not allowed or chat_id_str not in allowed:
+        if chat_id_str not in allowed and not self._telegram_authorized_sender_auto_trusts_group(raw_message):
             return event
         shared_source = self._telegram_group_observe_shared_source(event.source)
         observe_prompt = self._telegram_group_observe_channel_prompt()

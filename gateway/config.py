@@ -912,6 +912,10 @@ def load_gateway_config() -> GatewayConfig:
                     bridged["observe_unmentioned_group_messages"] = platform_cfg["observe_unmentioned_group_messages"]
                 if plat == Platform.TELEGRAM and "ambient_chats" in platform_cfg:
                     bridged["ambient_chats"] = _coerce_str_list(platform_cfg["ambient_chats"])
+                if plat == Platform.TELEGRAM and "auto_trust_groups_from_authorized_senders" in platform_cfg:
+                    bridged["auto_trust_groups_from_authorized_senders"] = platform_cfg["auto_trust_groups_from_authorized_senders"]
+                if plat == Platform.TELEGRAM and "auto_ambient_chats_from_authorized_senders" in platform_cfg:
+                    bridged["auto_ambient_chats_from_authorized_senders"] = platform_cfg["auto_ambient_chats_from_authorized_senders"]
                 if "dm_policy" in platform_cfg:
                     bridged["dm_policy"] = platform_cfg["dm_policy"]
                 if "allow_from" in platform_cfg:
@@ -1150,7 +1154,19 @@ def load_gateway_config() -> GatewayConfig:
                     if isinstance(group_allowed_chats, list):
                         group_allowed_chats = ",".join(str(v) for v in group_allowed_chats)
                     os.environ["TELEGRAM_GROUP_ALLOWED_CHATS"] = str(group_allowed_chats)
-                for _telegram_extra_key in ("guest_mode", "disable_link_previews", "observe_unmentioned_group_messages"):
+                for _auto_key, _auto_env in (
+                    ("auto_trust_groups_from_authorized_senders", "TELEGRAM_AUTO_TRUST_GROUPS_FROM_AUTHORIZED_SENDERS"),
+                    ("auto_ambient_chats_from_authorized_senders", "TELEGRAM_AUTO_AMBIENT_CHATS_FROM_AUTHORIZED_SENDERS"),
+                ):
+                    if _auto_key in telegram_cfg and not os.getenv(_auto_env):
+                        os.environ[_auto_env] = str(telegram_cfg[_auto_key]).lower()
+                for _telegram_extra_key in (
+                    "guest_mode",
+                    "disable_link_previews",
+                    "observe_unmentioned_group_messages",
+                    "auto_trust_groups_from_authorized_senders",
+                    "auto_ambient_chats_from_authorized_senders",
+                ):
                     if _telegram_extra_key in telegram_cfg:
                         plat_data = platforms_data.setdefault(Platform.TELEGRAM.value, {})
                         if not isinstance(plat_data, dict):
@@ -1422,6 +1438,16 @@ def _apply_env_overrides(config: GatewayConfig) -> None:
         config.platforms[Platform.TELEGRAM].extra["ambient_chats"] = _coerce_str_list(
             telegram_ambient_chats
         )
+
+    for _env_name, _extra_key in (
+        ("TELEGRAM_AUTO_TRUST_GROUPS_FROM_AUTHORIZED_SENDERS", "auto_trust_groups_from_authorized_senders"),
+        ("TELEGRAM_AUTO_AMBIENT_CHATS_FROM_AUTHORIZED_SENDERS", "auto_ambient_chats_from_authorized_senders"),
+    ):
+        raw = os.getenv(_env_name)
+        if raw is not None:
+            if Platform.TELEGRAM not in config.platforms:
+                config.platforms[Platform.TELEGRAM] = PlatformConfig()
+            config.platforms[Platform.TELEGRAM].extra[_extra_key] = raw.lower() in {"true", "1", "yes", "on"}
 
     telegram_home = os.getenv("TELEGRAM_HOME_CHANNEL")
     if telegram_home and Platform.TELEGRAM in config.platforms:

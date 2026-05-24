@@ -64,7 +64,7 @@ This is only consulted after `_should_process_message(...)` returns `False` in t
 2. The message is from a group/supergroup.
 3. Allowed topic and ignored-thread checks pass.
 4. Exclusive mentions of another bot are excluded.
-5. The chat is in `_telegram_observe_allowed_chats()`, which requires `group_allowed_chats` and also intersects `allowed_chats` when that response gate is set.
+5. The chat is in `_telegram_observe_allowed_chats()` (which requires `group_allowed_chats` and also intersects `allowed_chats` when that response gate is set), **or** `auto_trust_groups_from_authorized_senders` is enabled and the current sender is already authorized through the normal Telegram user allowlist/pairing path.
 6. The chat is not in `free_response_chats`.
 7. `require_mention` is enabled.
 8. The message is not a reply to the bot, does not mention the bot, and does not match mention patterns.
@@ -107,7 +107,7 @@ It returns the original event unless all of these are true:
 
 1. `observe_unmentioned_group_messages` is enabled.
 2. The raw message is a Telegram group/supergroup message.
-3. The chat is in `_telegram_observe_allowed_chats()`.
+3. The chat is in `_telegram_observe_allowed_chats()`, or the conservative authorized-sender auto-trust policy accepts the current sender.
 
 When active, it:
 
@@ -223,7 +223,7 @@ _should_process_message(message) == False
   -> if wake: build a MessageEvent on the shared observed session and enqueue it
 ```
 
-This location preserves the existing safety gates: only trusted, observe-allowlisted groups/topics reach the ambient classifier, and explicit triggers still bypass the ambient decision gate and go straight to the normal agent path. Ambient chat allowlisting accepts whole-chat entries (`-1001234567890`) and topic-specific entries (`-1001234567890:17585`).
+This location preserves the existing safety gates: only trusted groups/topics reach the ambient classifier. Trust is normally explicit through `group_allowed_chats` + `ambient_chats`; during first setup it may be sender-scoped through `auto_trust_groups_from_authorized_senders` + `auto_ambient_chats_from_authorized_senders`, which admits only already-authorized senders and never grants unknown group members blanket access. Explicit triggers still bypass the ambient decision gate and go straight to the normal agent path. Ambient chat allowlisting accepts whole-chat entries (`-1001234567890`) and topic-specific entries (`-1001234567890:17585`).
 
 ## Session behavior relevant to group observation
 

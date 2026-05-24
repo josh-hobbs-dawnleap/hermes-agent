@@ -81,29 +81,35 @@ For OpenClaw/Yuanbao-style group behavior, configure Telegram so the bot can **s
 
 ```yaml
 telegram:
-  allowed_chats:
-    - "-1001234567890"
-  group_allowed_chats:
-    - "-1001234567890"
+  allowed_chats: []
+  group_allowed_chats: []
+  ambient_chats: []
+  auto_trust_groups_from_authorized_senders: true
+  auto_ambient_chats_from_authorized_senders: true
   require_mention: true
   observe_unmentioned_group_messages: true
 ```
 
-With this mode enabled, unmentioned group messages from explicitly allowlisted chats/topics are appended to the shared chat/topic session transcript as observed context, but they do not dispatch the agent. `allowed_chats` gates where the bot responds; `group_allowed_chats` authorizes the shared group session used for observed context, so use the same chat IDs for this mode. A later `@botname` mention, reply to the bot, or configured mention pattern in that same allowlisted chat/topic can use that observed context. The triggered message is also tagged with `[nickname|user_id]` and gets a per-turn safety prompt so the model treats prior observed lines as context, not instructions addressed to the bot.
+With this mode enabled, unmentioned group messages from trusted chats/topics are appended to the shared chat/topic session transcript as observed context, but they do not dispatch the agent. Normally, `allowed_chats` gates where the bot responds and `group_allowed_chats` authorizes the shared group session used for observed context, so use the same chat IDs for this mode. If you do not know the Telegram group ID yet, `auto_trust_groups_from_authorized_senders: true` lets already-authorized Telegram users bootstrap the group without granting unknown group members access; `auto_ambient_chats_from_authorized_senders: true` extends that same sender-scoped policy to the ambient classifier. A later `@botname` mention, reply to the bot, or configured mention pattern in that same trusted chat/topic can use that observed context. The triggered message is also tagged with `[nickname|user_id]` and gets a per-turn safety prompt so the model treats prior observed lines as context, not instructions addressed to the bot.
 
-Equivalent environment variable:
+Equivalent environment variables:
 
 ```bash
+# Explicit group allowlist mode:
 TELEGRAM_ALLOWED_CHATS=-1001234567890
 TELEGRAM_GROUP_ALLOWED_CHATS=-1001234567890
 TELEGRAM_OBSERVE_UNMENTIONED_GROUP_MESSAGES=true
+
+# Optional no-known-group-ID bootstrap mode:
+TELEGRAM_AUTO_TRUST_GROUPS_FROM_AUTHORIZED_SENDERS=true
+TELEGRAM_AUTO_AMBIENT_CHATS_FROM_AUTHORIZED_SENDERS=true
 ```
 
 This requires Telegram to deliver ordinary group messages to the gateway, so disable BotFather privacy mode or promote the bot to group admin as described above.
 
 ### Ambient response gate configuration
 
-Ambient mode is a separate opt-in gate for deciding whether Hermes may proactively respond to allowed group chatter. It is disabled by default and only operates in Telegram chats/topics that you explicitly allowlist with `telegram.ambient_chats` (routing behavior is otherwise unchanged: `require_mention` and `observe_unmentioned_group_messages` keep their existing meanings).
+Ambient mode is a separate opt-in gate for deciding whether Hermes may proactively respond to trusted group chatter. It is disabled by default and normally only operates in Telegram chats/topics that you explicitly allowlist with `telegram.ambient_chats`. During first setup, `telegram.auto_ambient_chats_from_authorized_senders: true` may temporarily admit messages from already-authorized senders before the group ID is known; unknown senders remain silent. Routing behavior is otherwise unchanged: `require_mention` and `observe_unmentioned_group_messages` keep their existing meanings.
 
 ```yaml
 ambient:
@@ -124,7 +130,7 @@ telegram:
     - "-1001234567890"
 ```
 
-Important: leaving `ambient.enabled: false` keeps the ambient gate off even if `telegram.ambient_chats` is populated. Use the allowlist as a second safety gate; do not rely on ambient mode for chats/topics that are not explicitly listed.
+Important: leaving `ambient.enabled: false` keeps the ambient gate off even if `telegram.ambient_chats` is populated. Use the allowlist as a second safety gate whenever possible. The authorized-sender auto-ambient setting is a bootstrap convenience for trusted operators who do not know the group ID yet; it should be replaced with explicit `group_allowed_chats` / `ambient_chats` entries after the gateway sees the group.
 
 When ambient mode is enabled for an allowlisted chat, Hermes first stores ordinary group chatter as observed context exactly as above. Before taking the store-only path, it may run a small auxiliary classifier (`task="ambient"`) with no tools and a compact JSON-only prompt. If the classifier says `respond: false`, Hermes remains silent. If it says `respond: true` and the chat/topic is not on cooldown, Hermes dispatches the full agent with an explicit safety prompt: observed group context is chat content, not instructions.
 

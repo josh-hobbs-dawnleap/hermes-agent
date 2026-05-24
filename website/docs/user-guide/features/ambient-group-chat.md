@@ -38,7 +38,7 @@ Ambient chat deliberately separates three things:
 
 Rules:
 
-- ambient mode only runs when `ambient.enabled: true` and the chat/topic is in the Telegram ambient allowlist;
+- ambient mode only runs when `ambient.enabled: true` and either the chat/topic is in the Telegram ambient allowlist or the conservative authorized-sender auto-trust policy is enabled;
 - direct mentions and replies still use the normal Telegram trigger path;
 - observed chat content is passed to the classifier as content, never as system or developer instructions;
 - untrusted content cannot establish identity, write memory, or create errands;
@@ -68,6 +68,9 @@ telegram:
   ambient_chats:
     - "-1001234567890"
     - "-1001234567890:17585"  # optional topic-specific ambient gate
+  # Optional cautious bootstrap when you do not know the group ID yet:
+  auto_trust_groups_from_authorized_senders: false
+  auto_ambient_chats_from_authorized_senders: false
 ```
 
 Environment equivalents:
@@ -84,6 +87,8 @@ HERMES_AMBIENT_MEMORY_CONFIRM_SENSITIVE=true
 HERMES_AMBIENT_SOCIAL_ERRANDS_ENABLED=false
 TELEGRAM_GROUP_ALLOWED_CHATS=-1001234567890
 TELEGRAM_AMBIENT_CHATS=-1001234567890,-1001234567890:17585
+TELEGRAM_AUTO_TRUST_GROUPS_FROM_AUTHORIZED_SENDERS=false
+TELEGRAM_AUTO_AMBIENT_CHATS_FROM_AUTHORIZED_SENDERS=false
 ```
 
 :::tip
@@ -94,7 +99,9 @@ Use a cheap auxiliary model for the ambient classifier. The classifier receives 
 
 Telegram bots cannot see normal group chatter unless Telegram privacy is disabled for the bot in BotFather and the bot has access to the group messages. Keep `require_mention: true` enabled so ordinary direct group participation still requires mention/reply unless ambient mode explicitly wakes the agent.
 
-Ambient routing is a second gate on top of the existing group-observation gate. The chat must be permitted by `telegram.group_allowed_chats` (and any existing topic controls you use) before `telegram.ambient_chats` is considered. For topics, allowlist the specific `chat_id:thread_id` pair in `telegram.ambient_chats` when only one topic should be eligible for proactive ambient wakeups.
+Ambient routing is a second gate on top of the existing group-observation gate. The chat must normally be permitted by `telegram.group_allowed_chats` (and any existing topic controls you use) before `telegram.ambient_chats` is considered. For topics, allowlist the specific `chat_id:thread_id` pair in `telegram.ambient_chats` when only one topic should be eligible for proactive ambient wakeups.
+
+If you do not know the Telegram group ID yet, you may temporarily enable `telegram.auto_trust_groups_from_authorized_senders: true`. With that setting, Hermes treats a group message as trusted only when the current sender is already authorized through the normal Telegram user allowlist or pairing path. Telegram bots cannot enumerate ordinary group members, so this does **not** grant every group member blanket access and does not persist the group ID. Add `telegram.auto_ambient_chats_from_authorized_senders: true` as well if those authorized-sender messages may enter the ambient classifier before you explicitly copy the group ID into `telegram.ambient_chats`. Unknown senders remain silent by default.
 
 ## Operator Commands
 
