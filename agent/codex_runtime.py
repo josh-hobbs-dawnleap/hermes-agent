@@ -245,7 +245,7 @@ def run_codex_stream(agent, api_kwargs: dict, client: Any = None, on_first_delta
                 # but get_final_response() can return an empty output list.
                 # Backfill from collected items or synthesize from deltas.
                 _out = getattr(final_response, "output", None)
-                if isinstance(_out, list) and not _out:
+                if _out is None or (isinstance(_out, list) and not _out):
                     if collected_output_items:
                         final_response.output = list(collected_output_items)
                         logger.debug(
@@ -264,6 +264,19 @@ def run_codex_stream(agent, api_kwargs: dict, client: Any = None, on_first_delta
                             "Codex stream: synthesized output from %d text deltas (%d chars)",
                             len(agent._codex_streamed_text_parts), len(assembled),
                         )
+                    else:
+                        out_text = getattr(final_response, "output_text", None)
+                        if isinstance(out_text, str) and out_text.strip():
+                            final_response.output = [SimpleNamespace(
+                                type="message",
+                                role="assistant",
+                                status="completed",
+                                content=[SimpleNamespace(type="output_text", text=out_text.strip())],
+                            )]
+                            logger.debug(
+                                "Codex stream: synthesized output from final output_text (%d chars)",
+                                len(out_text.strip()),
+                            )
                 return final_response
         except (_httpx.RemoteProtocolError, _httpx.ReadTimeout, _httpx.ConnectError, ConnectionError) as exc:
             if attempt < max_stream_retries:
@@ -281,6 +294,31 @@ def run_codex_stream(agent, api_kwargs: dict, client: Any = None, on_first_delta
                 exc,
             )
             return agent._run_codex_create_stream_fallback(api_kwargs, client=active_client)
+        except TypeError as exc:
+            err_text = str(exc)
+            sdk_none_output_parse_error = (
+                "NoneType" in err_text
+                and "iterable" in err_text
+            )
+            if sdk_none_output_parse_error and attempt < max_stream_retries:
+                logger.debug(
+                    "Responses stream final-response parser failed on null output "
+                    "(attempt %s/%s); retrying. %s err=%s",
+                    attempt + 1,
+                    max_stream_retries + 1,
+                    agent._client_log_context(),
+                    err_text,
+                )
+                continue
+            if sdk_none_output_parse_error:
+                logger.debug(
+                    "Responses stream final-response parser failed on null output; "
+                    "falling back to create(stream=True). %s err=%s",
+                    agent._client_log_context(),
+                    err_text,
+                )
+                return agent._run_codex_create_stream_fallback(api_kwargs, client=active_client)
+            raise
         except RuntimeError as exc:
             err_text = str(exc)
             missing_completed = "response.completed" in err_text
@@ -408,7 +446,7 @@ def run_codex_create_stream_fallback(agent, api_kwargs: dict, client: Any = None
             if terminal_response is not None:
                 # Backfill empty output from collected stream events
                 _out = getattr(terminal_response, "output", None)
-                if isinstance(_out, list) and not _out:
+                if _out is None or (isinstance(_out, list) and not _out):
                     if collected_output_items:
                         terminal_response.output = list(collected_output_items)
                         logger.debug(
@@ -426,6 +464,18 @@ def run_codex_create_stream_fallback(agent, api_kwargs: dict, client: Any = None
                             "Codex fallback stream: synthesized from %d deltas (%d chars)",
                             len(collected_text_deltas), len(assembled),
                         )
+                    else:
+                        out_text = getattr(terminal_response, "output_text", None)
+                        if isinstance(out_text, str) and out_text.strip():
+                            terminal_response.output = [SimpleNamespace(
+                                type="message", role="assistant",
+                                status="completed",
+                                content=[SimpleNamespace(type="output_text", text=out_text.strip())],
+                            )]
+                            logger.debug(
+                                "Codex fallback stream: synthesized from final output_text (%d chars)",
+                                len(out_text.strip()),
+                            )
                 return terminal_response
     finally:
         close_fn = getattr(stream_or_response, "close", None)

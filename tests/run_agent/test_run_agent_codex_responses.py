@@ -155,9 +155,10 @@ def _codex_ack_message_response(text: str):
 
 
 class _FakeResponsesStream:
-    def __init__(self, *, final_response=None, final_error=None):
+    def __init__(self, *, final_response=None, final_error=None, events=None):
         self._final_response = final_response
         self._final_error = final_error
+        self._events = list(events or [])
 
     def __enter__(self):
         return self
@@ -166,7 +167,7 @@ class _FakeResponsesStream:
         return False
 
     def __iter__(self):
-        return iter(())
+        return iter(self._events)
 
     def get_final_response(self):
         if self._final_error is not None:
@@ -479,6 +480,77 @@ def test_run_codex_stream_fallback_parses_create_stream_events(monkeypatch):
     assert calls["create"] == 1
     assert create_stream.closed is True
     assert response.output[0].content[0].text == "streamed create ok"
+
+
+def test_run_codex_stream_backfills_none_output_from_text_deltas(monkeypatch):
+    """Regression: some Responses backends return final_response.output=None.
+    Hermes should repair that at the runtime boundary instead of relying on a
+    site-packages OpenAI SDK hot-patch or letting normalization fail later."""
+    agent = _build_agent(monkeypatch)
+    calls = {"stream": 0}
+
+    def _fake_stream(**kwargs):
+        calls["stream"] += 1
+        return _FakeResponsesStream(
+            events=[
+                SimpleNamespace(type="response.output_text.delta", delta="Hello "),
+                SimpleNamespace(type="response.output_text.delta", delta="from deltas"),
+            ],
+            final_response=SimpleNamespace(
+                output=None,
+                output_text=None,
+                usage=SimpleNamespace(input_tokens=5, output_tokens=3, total_tokens=8),
+                status="completed",
+                model="gpt-5-codex",
+            ),
+        )
+
+    agent.client = SimpleNamespace(
+        responses=SimpleNamespace(
+            stream=_fake_stream,
+            create=lambda **kwargs: _codex_message_response("fallback"),
+        )
+    )
+
+    response = agent._run_codex_stream(_codex_request_kwargs())
+    assert response is not None
+    assert calls["stream"] == 1
+    assert response.output[0].content[0].text == "Hello from deltas"
+
+
+def test_run_codex_stream_falls_back_when_sdk_parser_sees_none_output(monkeypatch):
+    """Regression: OpenAI SDK 2.24.0 can raise TypeError when parsing a
+    Responses object whose output field is null. Hermes should recover without
+    editing the active virtualenv in site-packages, a splendid way to own a
+    bespoke foot-gun."""
+    agent = _build_agent(monkeypatch)
+    calls = {"stream": 0, "create": 0}
+
+    def _fake_stream(**kwargs):
+        calls["stream"] += 1
+        return _FakeResponsesStream(
+            final_error=TypeError("'NoneType' object is not iterable")
+        )
+
+    def _fake_create(**kwargs):
+        calls["create"] += 1
+        assert kwargs.get("stream") is True
+        return _FakeCreateStream([
+            SimpleNamespace(type="response.completed", response=_codex_message_response("create recovered")),
+        ])
+
+    agent.client = SimpleNamespace(
+        responses=SimpleNamespace(
+            stream=_fake_stream,
+            create=_fake_create,
+        )
+    )
+
+    response = agent._run_codex_stream(_codex_request_kwargs())
+    assert response is not None
+    assert calls["stream"] == 2
+    assert calls["create"] == 1
+    assert response.output[0].content[0].text == "create recovered"
 
 
 def test_run_conversation_codex_plain_text(monkeypatch):
