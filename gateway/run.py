@@ -201,15 +201,24 @@ def _looks_like_gateway_provider_error(text: str) -> bool:
     # to mention HTTP status codes ("HTTP 404 means...") tend to be longer.
     if len(body) > 400 or body.count("\n") > 4:
         return False
-    return bool(_GATEWAY_PROVIDER_ERROR_SHAPE_RE.search(body))
+    if _GATEWAY_PROVIDER_ERROR_SHAPE_RE.search(body):
+        return True
+    # Some SDK/client-side provider failures surface as bare Python exception
+    # text rather than an HTTP/API envelope. Telegram users do not need raw
+    # parser internals like "'NoneType' object is not iterable"; keep that in
+    # logs and send the same concise provider-failure category as other model
+    # infrastructure errors.
+    if re.fullmatch(r"['\"]?NoneType['\"]? object is not iterable", body):
+        return True
+    return False
 
 
 def _sanitize_gateway_final_response(platform: Any, text: str) -> str:
     """Sanitize final gateway replies before sending them to high-noise chats.
 
-    Telegram is Bob's mobile inbox, so it should receive concise, safe provider
+    Telegram is a mobile inbox, so it should receive concise, safe provider
     failure categories instead of raw HTTP bodies, request IDs, or policy text.
-    Other platforms keep the existing behaviour for now.
+    Other platforms keep the existing behavior for now.
     """
     if not text:
         return text
@@ -234,7 +243,10 @@ def _prepare_gateway_status_message(platform: Any, event_type: str, message: str
     if _TELEGRAM_NOISY_STATUS_RE.search(text):
         return None
     if _looks_like_gateway_provider_error(text):
-        return _gateway_provider_error_reply(text)
+        # Status callbacks are intermediate diagnostics. The final gateway
+        # response path sanitizes and sends one user-facing provider failure;
+        # sending status callbacks too creates duplicate Telegram alerts.
+        return None
     return text
 
 

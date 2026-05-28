@@ -30,20 +30,14 @@ def test_non_telegram_status_is_unchanged():
     assert _prepare_gateway_status_message("local", "lifecycle", message) == message
 
 
-def test_telegram_status_sanitizes_raw_provider_security_errors():
-    """Provider policy/security bodies should be replaced before chat delivery."""
+def test_telegram_status_suppresses_raw_provider_security_errors():
+    """Provider errors should not be sent as intermediate Telegram status spam."""
     raw = (
         "❌ API failed after 3 retries — HTTP 400: request blocked because "
         "Operation contains cybersecurity risk. request_id=req_123"
     )
 
-    sanitized = _prepare_gateway_status_message(Platform.TELEGRAM, "lifecycle", raw)
-
-    assert sanitized is not None
-    assert "provider rejected" in sanitized.lower()
-    assert "cybersecurity risk" not in sanitized.lower()
-    assert "HTTP 400" not in sanitized
-    assert "req_123" not in sanitized
+    assert _prepare_gateway_status_message(Platform.TELEGRAM, "lifecycle", raw) is None
 
 
 def test_telegram_final_response_sanitizes_raw_provider_errors():
@@ -59,6 +53,16 @@ def test_telegram_final_response_sanitizes_raw_provider_errors():
     assert "cybersecurity risk" not in sanitized.lower()
     assert "HTTP 400" not in sanitized
     assert "req_abc" not in sanitized
+
+
+def test_telegram_final_response_sanitizes_bare_provider_type_errors():
+    """Client-side provider parser exceptions should not leak to Telegram."""
+    raw = "'NoneType' object is not iterable"
+
+    sanitized = _sanitize_gateway_final_response(Platform.TELEGRAM, raw)
+
+    assert "model provider failed" in sanitized.lower()
+    assert "NoneType" not in sanitized
 
 
 def test_telegram_final_response_redacts_auth_secrets():
