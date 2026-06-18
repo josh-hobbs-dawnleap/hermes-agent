@@ -4801,6 +4801,16 @@ class TelegramAdapter(BasePlatformAdapter):
             identity_summary=self._ambient_identity_summary(event, sender_person),
             config=self._ambient_config(),
         )
+        adapter_name = getattr(self, "name", "telegram")
+        logger.info(
+            "[%s] Telegram ambient decision: chat=%s from=%s respond=%s confidence=%.2f reason=%s",
+            adapter_name,
+            getattr(getattr(message, "chat", None), "id", "unknown"),
+            event.source.user_id or "unknown",
+            bool(getattr(decision, "respond", False)),
+            float(getattr(decision, "confidence", 0.0) or 0.0),
+            getattr(decision, "respond_reason", None) or "",
+        )
         return self._ambient_event_from_decision(
             message=message,
             event=event,
