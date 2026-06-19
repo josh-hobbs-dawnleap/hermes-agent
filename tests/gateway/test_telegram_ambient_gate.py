@@ -46,6 +46,47 @@ def _message(text="ordinary chat", chat_id=-100, user_id=1, thread_id=None):
     )
 
 
+def test_name_only_mention_pattern_does_not_wake_when_talking_about_assistant(monkeypatch):
+    adapter = _adapter(
+        {
+            "require_mention": True,
+            "observe_unmentioned_group_messages": True,
+            "group_allowed_chats": ["-100"],
+            "ambient_chats": ["-100"],
+            "mention_patterns": [r"\bWinston\b"],
+        }
+    )
+    adapter._mention_patterns = adapter._compile_mention_patterns()
+    called = False
+
+    def fake_classifier(**kwargs):
+        nonlocal called
+        called = True
+        return SimpleNamespace(respond=True)
+
+    monkeypatch.setattr("gateway.platforms.telegram.classify_ambient_message", fake_classifier)
+    msg = _message("Let's test that again. Julia, what do you think of Winston?")
+
+    assert adapter._should_process_message(msg) is False
+    assert adapter._ambient_event_for_unmentioned_group_message(msg, MessageType.TEXT, update_id=1) is None
+    assert called is False
+
+
+def test_name_mention_pattern_still_wakes_when_directly_addressed():
+    adapter = _adapter(
+        {
+            "require_mention": True,
+            "observe_unmentioned_group_messages": True,
+            "group_allowed_chats": ["-100"],
+            "ambient_chats": ["-100"],
+            "mention_patterns": [r"\bWinston\b"],
+        }
+    )
+    adapter._mention_patterns = adapter._compile_mention_patterns()
+
+    assert adapter._should_process_message(_message("Winston, what do you think?")) is True
+
+
 def test_ambient_gate_silences_store_only_message(monkeypatch):
     adapter = _adapter(
         {

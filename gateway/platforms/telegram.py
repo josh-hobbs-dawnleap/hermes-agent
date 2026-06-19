@@ -66,7 +66,12 @@ from pathlib import Path as _Path
 sys.path.insert(0, str(_Path(__file__).resolve().parents[2]))
 
 from gateway.config import Platform, PlatformConfig
-from gateway.ambient import classify_ambient_message
+from gateway.ambient import (
+    _assistant_names_from_config,
+    _is_direct_plaintext_address,
+    _is_third_person_assistant_name_mention,
+    classify_ambient_message,
+)
 from gateway.identity_map import IdentityMapStore
 from gateway.platforms.base import (
     BasePlatformAdapter,
@@ -4553,12 +4558,23 @@ class TelegramAdapter(BasePlatformAdapter):
     def _message_matches_mention_patterns(self, message: Message) -> bool:
         if not self._mention_patterns:
             return False
+        assistant_names = tuple(
+            name.lower() for name in _assistant_names_from_config(self._ambient_config())
+        )
         for candidate in (getattr(message, "text", None), getattr(message, "caption", None)):
             if not candidate:
                 continue
             for pattern in self._mention_patterns:
-                if pattern.search(candidate):
-                    return True
+                match = pattern.search(candidate)
+                if not match:
+                    continue
+                matched_text = (match.group(0) or "").strip().strip("@.,;:!?-–—").lower()
+                if (
+                    matched_text in assistant_names
+                    and not _is_direct_plaintext_address(candidate, tuple(assistant_names))
+                ):
+                    continue
+                return True
         return False
 
     def _is_guest_mention(self, message: Message) -> bool:
@@ -4763,6 +4779,11 @@ class TelegramAdapter(BasePlatformAdapter):
             return None
         if self._ambient_response_on_cooldown(message):
             return None
+        if _is_third_person_assistant_name_mention(
+            getattr(message, "text", None) or getattr(message, "caption", None) or "",
+            self._ambient_config(),
+        ):
+            return None
         event = self._build_message_event(message, msg_type, update_id=update_id)
         shared_source = self._telegram_group_observe_shared_source(event.source)
         sender_person = self._ambient_sender_person(event)
@@ -4789,6 +4810,11 @@ class TelegramAdapter(BasePlatformAdapter):
         if not self._is_ambient_chat(message):
             return None
         if self._ambient_response_on_cooldown(message):
+            return None
+        if _is_third_person_assistant_name_mention(
+            getattr(message, "text", None) or getattr(message, "caption", None) or "",
+            self._ambient_config(),
+        ):
             return None
         event = self._build_message_event(message, msg_type, update_id=update_id)
         shared_source = self._telegram_group_observe_shared_source(event.source)
