@@ -73,6 +73,7 @@ from gateway.ambient import (
     classify_ambient_message,
 )
 from gateway.identity_map import IdentityMapStore
+from gateway.memory_candidates import build_named_person_memory_entry
 from gateway.platforms.base import (
     BasePlatformAdapter,
     MessageEvent,
@@ -94,6 +95,7 @@ from gateway.platforms.telegram_network import (
     discover_fallback_ips,
     parse_fallback_ip_env,
 )
+from tools.memory_tool import MemoryStore, memory_tool
 from utils import atomic_replace
 
 _TELEGRAM_IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp", ".gif"}
@@ -4769,6 +4771,63 @@ class TelegramAdapter(BasePlatformAdapter):
             else f"{self._telegram_group_observe_channel_prompt()}\n\n{prompt}",
         )
 
+    def _ambient_maybe_save_memory_candidate(self, *, event: MessageEvent, decision) -> None:
+        """Persist a conservative ambient memory candidate without waking the agent."""
+        config = self._ambient_config()
+        if not getattr(config, "memory_enabled", True):
+            return
+        if not getattr(config, "memory_auto_save_low_sensitivity", False):
+            return
+        if not getattr(decision, "memory_candidate", False):
+            return
+        candidate = getattr(decision, "memory", None)
+        if candidate is None:
+            return
+
+        adapter_name = getattr(self, "name", "telegram")
+        try:
+            entry = build_named_person_memory_entry(
+                candidate,
+                platform="telegram",
+                identity_store=IdentityMapStore(),
+                trusted_source=True,
+                confirmation=False,
+            )
+            if not entry.ok or not entry.entry:
+                logger.info(
+                    "[%s] Ambient memory candidate skipped: %s",
+                    adapter_name,
+                    entry.error or "not accepted",
+                )
+                return
+
+            store = MemoryStore()
+            store.load_from_disk()
+            raw_result = memory_tool(
+                action="add",
+                target="memory",
+                content=entry.entry,
+                store=store,
+            )
+            try:
+                result = json.loads(raw_result)
+            except Exception:
+                result = {"success": False, "error": raw_result}
+            if result.get("success"):
+                logger.info(
+                    "[%s] Ambient memory saved from Telegram group context: %s",
+                    adapter_name,
+                    entry.entry,
+                )
+            else:
+                logger.info(
+                    "[%s] Ambient memory candidate not saved: %s",
+                    adapter_name,
+                    result.get("error") or result,
+                )
+        except Exception as exc:
+            logger.warning("[%s] Failed to handle ambient memory candidate: %s", adapter_name, exc)
+
     def _ambient_event_for_unmentioned_group_message(
         self,
         message: Message,
@@ -4794,6 +4853,7 @@ class TelegramAdapter(BasePlatformAdapter):
             identity_summary=self._ambient_identity_summary(event, sender_person),
             config=self._ambient_config(),
         )
+        self._ambient_maybe_save_memory_candidate(event=event, decision=decision)
         return self._ambient_event_from_decision(
             message=message,
             event=event,
@@ -4837,6 +4897,7 @@ class TelegramAdapter(BasePlatformAdapter):
             float(getattr(decision, "confidence", 0.0) or 0.0),
             getattr(decision, "respond_reason", None) or "",
         )
+        self._ambient_maybe_save_memory_candidate(event=event, decision=decision)
         return self._ambient_event_from_decision(
             message=message,
             event=event,

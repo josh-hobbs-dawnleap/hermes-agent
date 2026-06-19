@@ -105,6 +105,53 @@ def test_ambient_gate_silences_store_only_message(monkeypatch):
     assert adapter._session_store.entries[0][1]["observed"] is True
 
 
+def test_ambient_gate_saves_low_sensitivity_memory_candidate_without_waking(monkeypatch):
+    adapter = _adapter(
+        {
+            "require_mention": True,
+            "observe_unmentioned_group_messages": True,
+            "group_allowed_chats": ["-100"],
+            "ambient_chats": ["-100"],
+        }
+    )
+    adapter._gateway_config.ambient.memory_auto_save_low_sensitivity = True
+    saved = []
+
+    monkeypatch.setattr(
+        "gateway.platforms.telegram.classify_ambient_message",
+        lambda **kwargs: SimpleNamespace(
+            respond=False,
+            memory_candidate=True,
+            memory=SimpleNamespace(person="Julia Hobbs", fact="likes mashed potatoes", sensitivity="low"),
+        ),
+    )
+    monkeypatch.setattr(
+        "gateway.platforms.telegram.build_named_person_memory_entry",
+        lambda *args, **kwargs: SimpleNamespace(
+            ok=True,
+            entry="Named person memory: Julia Hobbs likes mashed potatoes.",
+            error=None,
+        ),
+    )
+
+    class FakeMemoryStore:
+        def load_from_disk(self):
+            return None
+
+    def fake_memory_tool(**kwargs):
+        saved.append(kwargs)
+        return '{"success": true}'
+
+    monkeypatch.setattr("gateway.platforms.telegram.MemoryStore", FakeMemoryStore)
+    monkeypatch.setattr("gateway.platforms.telegram.memory_tool", fake_memory_tool)
+
+    assert adapter._handle_ambient_unmentioned_group_message(_message(), MessageType.TEXT, update_id=1) is False
+    assert saved
+    assert saved[0]["target"] == "memory"
+    assert "Julia Hobbs likes mashed potatoes" in saved[0]["content"]
+    assert adapter._session_store.entries[0][1]["observed"] is True
+
+
 def test_ambient_gate_wakes_agent_and_skips_observed_store_when_responds(monkeypatch):
     adapter = _adapter(
         {
