@@ -325,6 +325,36 @@ def _coerce_gateway_timestamp(value: Any) -> Optional[float]:
     return None
 
 
+def _format_message_timing(value: datetime) -> str:
+    """Return an ISO timestamp with timezone information for prompt context."""
+    if value.tzinfo is None:
+        value = value.astimezone()
+    return value.isoformat(timespec="seconds")
+
+
+def _prepend_message_timing_context(
+    message: str,
+    *,
+    sent_at: datetime,
+    handled_at: Optional[datetime] = None,
+) -> str:
+    """Prepend per-turn timing metadata to a gateway user message.
+
+    Messaging-platform sessions otherwise expose source/user/chat context but
+    not the triggering message time. Keep this on the user turn rather than
+    the reusable session context so prompt-cacheable session metadata remains
+    stable while the model still has enough temporal grounding to avoid
+    guessing "morning" at 9pm.
+    """
+    handled_at = handled_at or datetime.now().astimezone()
+    timing = (
+        "[Message timing]\n"
+        f"Triggering message sent at: {_format_message_timing(sent_at)}\n"
+        f"Host time now: {_format_message_timing(handled_at)}"
+    )
+    return f"{timing}\n\n{message}"
+
+
 def _auto_continue_freshness_window() -> float:
     """Return the configured auto-continue freshness window in seconds.
 
@@ -8438,9 +8468,14 @@ class GatewayRunner:
             }
             await self.hooks.emit("agent:start", hook_ctx)
 
+            timed_message_text = _prepend_message_timing_context(
+                message_text,
+                sent_at=getattr(event, "timestamp", None) or datetime.now().astimezone(),
+            )
+
             # Run the agent
             agent_result = await self._run_agent(
-                message=message_text,
+                message=timed_message_text,
                 context_prompt=context_prompt,
                 history=history,
                 source=source,
