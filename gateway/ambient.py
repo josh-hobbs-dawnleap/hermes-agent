@@ -12,6 +12,7 @@ from dataclasses import dataclass
 import json
 import logging
 import math
+import re
 from typing import Any, Mapping
 
 logger = logging.getLogger(__name__)
@@ -95,6 +96,52 @@ def _apply_ambient_feature_flags(classifier_text: str, config: Any) -> str | Map
     return data
 
 
+def _assistant_names_from_config(config: Any) -> tuple[str, ...]:
+    raw = getattr(config, "assistant_names", None) or ("Hermes", "Winston")
+    if isinstance(raw, str):
+        raw = [raw]
+    try:
+        names = tuple(str(item).strip() for item in raw if str(item).strip())
+    except TypeError:
+        names = ("Hermes", "Winston")
+    return names or ("Hermes", "Winston")
+
+
+def _is_direct_plaintext_address(message_text: str, assistant_names: tuple[str, ...]) -> bool:
+    """Return True when plain text appears addressed to the assistant by name."""
+    text = (message_text or "").strip()
+    if not text:
+        return False
+    for name in assistant_names:
+        escaped = re.escape(name)
+        if re.search(
+            rf"^\s*(?:hey|hi|hello|yo|okay|ok)?\s*{escaped}\b(?:\s*[,;:!?.-]|\s+)",
+            text,
+            re.IGNORECASE,
+        ):
+            return True
+        if re.search(rf"[,;:]\s*{escaped}\s*[!?.]*$", text, re.IGNORECASE):
+            return True
+    return False
+
+
+def _is_third_person_assistant_name_mention(message_text: str, config: Any) -> bool:
+    """Detect messages talking about the assistant rather than to it.
+
+    Ambient mode should not treat the assistant's name as a wake word. A direct
+    plaintext address such as "Winston, help" may still go to the classifier;
+    third-person mentions like "What do you think about Winston, Julia?" stay
+    silent unless explicitly mentioned/tagged through the platform.
+    """
+    text = message_text or ""
+    names = _assistant_names_from_config(config)
+    mentioned = any(
+        re.search(rf"\b{re.escape(name)}\b", text, re.IGNORECASE)
+        for name in names
+    )
+    return mentioned and not _is_direct_plaintext_address(text, names)
+
+
 def classify_ambient_message(
     *,
     message_text: str,
@@ -110,6 +157,9 @@ def classify_ambient_message(
     """
 
     if not getattr(config, "enabled", False):
+        return silent_ambient_decision()
+
+    if _is_third_person_assistant_name_mention(message_text, config):
         return silent_ambient_decision()
 
     context = list(recent_context or [])

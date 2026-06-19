@@ -466,6 +466,7 @@ class AmbientConfig:
     model: str = ""
     max_context_messages: int = 12
     response_cooldown_seconds: int = 900
+    assistant_names: List[str] = field(default_factory=lambda: ["Hermes", "Winston"])
     memory_enabled: bool = True
     memory_auto_save_low_sensitivity: bool = False
     memory_confirm_sensitive: bool = True
@@ -478,6 +479,7 @@ class AmbientConfig:
             "model": self.model,
             "max_context_messages": self.max_context_messages,
             "response_cooldown_seconds": self.response_cooldown_seconds,
+            "assistant_names": list(self.assistant_names),
             "memory_enabled": self.memory_enabled,
             "memory_auto_save_low_sensitivity": self.memory_auto_save_low_sensitivity,
             "memory_confirm_sensitive": self.memory_confirm_sensitive,
@@ -494,6 +496,7 @@ class AmbientConfig:
             model=str(data.get("model") or ""),
             max_context_messages=max(_coerce_int(data.get("max_context_messages"), 12), 0),
             response_cooldown_seconds=max(_coerce_int(data.get("response_cooldown_seconds"), 900), 0),
+            assistant_names=_coerce_str_list(data.get("assistant_names")) or ["Hermes", "Winston"],
             memory_enabled=_coerce_bool(data.get("memory_enabled"), True),
             memory_auto_save_low_sensitivity=_coerce_bool(
                 data.get("memory_auto_save_low_sensitivity"), False

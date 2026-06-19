@@ -78,6 +78,50 @@ def test_classifier_defaults_to_silence_when_disabled_or_llm_fails(monkeypatch):
     assert failed.social_errand is None
 
 
+def test_classifier_silences_third_person_assistant_name_mention(monkeypatch):
+    called = False
+
+    def fake_call_llm(**kwargs):
+        nonlocal called
+        called = True
+        return _Response('{"respond": true, "confidence": 0.9}')
+
+    monkeypatch.setattr("agent.auxiliary_client.call_llm", fake_call_llm)
+
+    decision = classify_ambient_message(
+        message_text="What do you think about Winston, Julia?",
+        recent_context=["[Joshua] Good morning, Julia", "[Julia] Hello bb"],
+        sender_person="Joshua Hobbs",
+        identity_summary="Joshua Hobbs and Julia Hobbs are trusted participants.",
+        config=AmbientConfig(enabled=True),
+    )
+
+    assert decision.respond is False
+    assert called is False
+
+
+def test_classifier_still_allows_direct_plaintext_address_to_assistant(monkeypatch):
+    called = False
+
+    def fake_call_llm(**kwargs):
+        nonlocal called
+        called = True
+        return _Response('{"respond": true, "confidence": 0.9}')
+
+    monkeypatch.setattr("agent.auxiliary_client.call_llm", fake_call_llm)
+
+    decision = classify_ambient_message(
+        message_text="Winston, what do you think?",
+        recent_context=[],
+        sender_person="Joshua Hobbs",
+        identity_summary="Joshua Hobbs is trusted.",
+        config=AmbientConfig(enabled=True),
+    )
+
+    assert called is True
+    assert decision.respond is True
+
+
 def test_classifier_honors_disabled_memory_and_social_errand_flags(monkeypatch):
     def fake_call_llm(**kwargs):
         return _Response(
