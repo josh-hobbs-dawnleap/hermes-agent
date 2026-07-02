@@ -13429,7 +13429,11 @@ class GatewayRunner:
             tid = str(thread_id)
             if tid and tid not in {"", "1"}:
                 metadata["direct_messages_topic_id"] = tid
-            anchor = reply_to_message_id or getattr(source, "message_id", None)
+            # In Telegram DMs, avoid automatically replying to every incoming
+            # message.  Only preserve an explicit reply target supplied by the
+            # caller (for example, when the user replied to a specific earlier
+            # message and we should keep that context visible).
+            anchor = reply_to_message_id
             if anchor is not None:
                 metadata["telegram_reply_to_message_id"] = str(anchor)
         return metadata

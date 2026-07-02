@@ -45,10 +45,12 @@ def _thread_metadata_for_source(source, reply_to_message_id: str | None = None) 
 
     Most platforms route threaded sends with a generic ``thread_id`` metadata
     value. Telegram private-chat topics created through Hermes' DM-topic helper
-    are exposed in updates as ``message_thread_id`` plus a reply anchor. Live
-    user-message replies route with ``message_thread_id`` + ``reply_to_message_id``;
-    synthetic/resumed sends that have no reply anchor fall back to Telegram's
-    ``direct_messages_topic_id`` when the Bot API supports it.
+    are exposed in updates as ``message_thread_id`` plus, optionally, a reply
+    anchor.  Do not silently fall back to the triggering DM's message id here:
+    Telegram users generally expect normal DM replies to appear as ordinary
+    messages, not as perpetual reply-to bubbles.  When the inbound message is
+    itself replying to a specific earlier message, callers pass that explicit
+    anchor in ``reply_to_message_id`` and we preserve it.
     """
     thread_id = getattr(source, "thread_id", None)
     if thread_id is None:
@@ -59,7 +61,7 @@ def _thread_metadata_for_source(source, reply_to_message_id: str | None = None) 
         tid = str(thread_id)
         if tid and tid not in {"", "1"}:
             metadata["direct_messages_topic_id"] = tid
-        anchor = reply_to_message_id or getattr(source, "message_id", None)
+        anchor = reply_to_message_id
         if anchor is not None:
             metadata["telegram_reply_to_message_id"] = str(anchor)
     return metadata
@@ -69,18 +71,16 @@ def _reply_anchor_for_event(event) -> str | None:
     """Return reply_to id for platforms that need reply semantics.
 
     Telegram forum/supergroup topics should be routed by topic metadata, not by
-    replying to the triggering message. Hermes-created Telegram private-chat
-    topic lanes prefer replying to the triggering user message so the answer
-    stays attached to the active lane; synthetic/resumed sends fall back to
-    ``direct_messages_topic_id`` metadata when no message id is available.
+    replying to the triggering message. Telegram private DMs should also avoid
+    automatic reply anchors; only preserve a true user-selected reply target
+    (``reply_to_message_id``), which is the useful "right here" case rather
+    than the irritating "every message is a reply" case.
     """
     source = getattr(event, "source", None)
     platform = _platform_name(getattr(source, "platform", None))
     thread_id = getattr(source, "thread_id", None)
-    if platform == "telegram" and thread_id and getattr(source, "chat_type", None) == "dm":
-        # Reply to the triggering user message. Replying to Telegram's earlier
-        # topic seed/anchor can render the bot response outside the active lane.
-        return getattr(event, "message_id", None) or getattr(event, "reply_to_message_id", None)
+    if platform == "telegram" and getattr(source, "chat_type", None) == "dm":
+        return getattr(event, "reply_to_message_id", None)
     if platform == "telegram" and thread_id:
         return None
     if platform == "feishu" and thread_id and getattr(event, "reply_to_message_id", None):
