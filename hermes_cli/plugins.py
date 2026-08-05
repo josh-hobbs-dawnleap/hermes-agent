@@ -1735,6 +1735,14 @@ class PluginManager:
         lookup_key = manifest.key or manifest.name
         platform_name = self._platform_name_from_manifest(manifest)
 
+        # A2A is both a gateway platform and an outbound client toolset. If we
+        # defer the whole plugin, the a2a_* tools never register for normal
+        # chat sessions, so enabled agents cannot call peers. Eager-load just
+        # this platform; its adapter is stdlib-only and still binds safely.
+        if platform_name == "a2a":
+            self._load_plugin(manifest)
+            return
+
         # Record an enabled placeholder for introspection (`hermes plugins
         # list`). The real module load swaps in a fully-populated LoadedPlugin
         # (tools/hooks/commands attribution) when the loader fires.
