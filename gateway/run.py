@@ -553,6 +553,36 @@ _GATEWAY_PROVIDER_ERROR_SHAPE_RE = re.compile(
     re.IGNORECASE,
 )
 
+_GATEWAY_INTERNAL_SCRATCH_RE = re.compile(
+    r"^\s*(?:"
+    r"need\s+(?:final|concise|answer)\b"
+    r"|patch\s+[a-z0-9_.\-/]+\.\s+(?:run|test|then|final)\b"
+    r"|run\s+tests?\.\s+(?:patch|then|final|answer)\b"
+    r"|browser\s+(?:qa|test|check)\.\s+(?:inspect|then|final)\b"
+    r")",
+    re.IGNORECASE,
+)
+
+_GATEWAY_INTERNAL_SCRATCH_REPLY = (
+    "⚠️ I caught an internal scratch note before sending it. "
+    "Ask me to retry and I’ll regenerate the reply cleanly."
+)
+
+
+def _looks_like_gateway_internal_scratch(text: str) -> bool:
+    """True for terse internal work notes accidentally routed as final replies.
+
+    The matcher is intentionally narrow and anchored to the start of the final
+    response. It catches known scratch-note shapes while allowing normal user
+    instructions such as "Run tests with pytest ..." to pass through.
+    """
+    if not text:
+        return False
+    body = str(text).strip()
+    if len(body) > 300 or body.count("\n") > 3:
+        return False
+    return bool(_GATEWAY_INTERNAL_SCRATCH_RE.search(body))
+
 
 def _looks_like_gateway_provider_error(text: str) -> bool:
     """True when text is infrastructure/provider failure, not normal content.
@@ -598,6 +628,8 @@ def _sanitize_gateway_final_response(platform: Any, text: str) -> str:
         return ""
 
     redacted = _redact_gateway_user_facing_secrets(str(text))
+    if _looks_like_gateway_internal_scratch(redacted):
+        return _GATEWAY_INTERNAL_SCRATCH_REPLY
     if _looks_like_gateway_provider_error(redacted):
         return _gateway_provider_error_reply(redacted)
     return redacted

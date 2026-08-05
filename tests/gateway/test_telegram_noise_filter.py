@@ -255,6 +255,39 @@ def test_chat_gateways_drop_interrupt_sentinel(platform):
     assert _sanitize_gateway_final_response("local", sentinel) == sentinel
 
 
+@pytest.mark.parametrize("platform", CHAT_PLATFORMS)
+@pytest.mark.parametrize(
+    "scratch",
+    [
+        "Need final concise. Mention tests passed and inventory updated.",
+        "Patch streaming. Run focused tests. Final concise.",
+        "Run tests. Patch the filter. Then answer Josh.",
+        "Browser QA. Inspect console. Then final.",
+    ],
+)
+def test_chat_gateways_replace_internal_scratch_final_responses(platform, scratch):
+    """Final chat delivery must not expose terse internal scratch notes."""
+    sanitized = _sanitize_gateway_final_response(platform, scratch)
+
+    assert sanitized
+    assert scratch not in sanitized
+    assert "internal scratch" in sanitized.lower()
+
+
+def test_programmatic_surfaces_keep_internal_scratch_final_responses_raw():
+    """Local/API surfaces are diagnostics, so they keep raw final text."""
+    scratch = "Need final concise. Mention tests passed and inventory updated."
+
+    assert _sanitize_gateway_final_response("local", scratch) == scratch
+
+
+def test_chat_gateways_do_not_block_normal_run_tests_answer():
+    """The scratch guard must stay narrow enough for ordinary instructions."""
+    answer = "Run tests with `pytest tests/gateway -q` after editing gateway code."
+
+    assert _sanitize_gateway_final_response(Platform.TELEGRAM, answer) == answer
+
+
 def test_telegram_status_sanitizes_raw_provider_security_errors():
     """Provider policy/security bodies should be replaced before chat delivery."""
     raw = (
