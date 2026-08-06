@@ -258,7 +258,12 @@ def _read_referenced_script(path: Path) -> tuple[Optional[str], bool]:
     flags = os.O_RDONLY | getattr(os, "O_NONBLOCK", 0)
     try:
         descriptor = os.open(path, flags)
-    except OSError:
+    except (OSError, ValueError):
+        # OSError: unreadable / missing / over-long paths. ValueError: an
+        # embedded NUL byte in *path* itself — a binary's decoded bytes
+        # tokenized into a bogus script path by the recursion (#77703). A
+        # guarded read must never crash the guard, so treat either as
+        # "nothing to scan" (mirrors the resolve() ValueError guard below).
         return None, False
     try:
         metadata = os.fstat(descriptor)
@@ -311,6 +316,11 @@ def _contains_unsafe_gateway_action(
             return True
 
     for script_path in _iter_referenced_shell_scripts(command, cwd=cwd):
+        # An embedded NUL can never name a filesystem entry.  Skip it before
+        # resolution or either local/remote reader gets a chance to reject it
+        # with ``ValueError: embedded null byte``.
+        if "\x00" in os.fspath(script_path):
+            continue
         try:
             resolved = script_path.resolve(strict=False)
         except (OSError, ValueError):
