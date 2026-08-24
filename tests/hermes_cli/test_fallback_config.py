@@ -4,6 +4,18 @@ from agent.secret_scope import reset_secret_scope, set_secret_scope
 from hermes_cli.fallback_config import resolve_entry_api_key
 
 
+def test_default_config_declares_communication_layer_defaults():
+    from hermes_cli.config_defaults import DEFAULT_CONFIG
+
+    comms = DEFAULT_CONFIG["communication_layer"]
+
+    assert comms["enabled"] is False
+    assert comms["provider"] == ""
+    assert comms["model"] == ""
+    assert isinstance(comms["fallback_providers"], list)
+    assert comms["preserve_code_blocks"] is True
+
+
 class TestResolveEntryApiKey:
     def test_inline_api_key_wins(self, monkeypatch):
         monkeypatch.setenv("FB_KEY", "env-key")

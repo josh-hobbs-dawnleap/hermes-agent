@@ -550,6 +550,8 @@ def finalize_turn(
 
     _response_transformed = False
     _pre_transform_response = None
+    _communication_layer = None
+    _pre_communication_response = None
 
     # Plugin hook: transform_llm_output
     # Fired once per turn after the tool-calling loop completes.
@@ -623,6 +625,29 @@ def finalize_turn(
     except Exception as exc:
         logger.warning("on_turn_complete notification failed: %s", exc)
 
+    # Communication/persona layer: optional delivery-only rewrite. This runs
+    # after canonical persistence and post-turn observation hooks so the main
+    # model remains the reasoning/tool authority in durable transcript state.
+    if final_response and not interrupted:
+        try:
+            from agent.communication_layer import rewrite_final_response
+            _rewrite = rewrite_final_response(agent, final_response)
+            _communication_layer = {
+                "changed": bool(_rewrite.changed),
+                "reason": _rewrite.reason,
+                "provider": _rewrite.provider,
+                "model": _rewrite.model,
+                "risk_flags": list(_rewrite.risk_flags or [])[:20],
+            }
+            if _rewrite.changed:
+                _pre_communication_response = final_response
+                final_response = _rewrite.text
+                _response_transformed = True
+                if _pre_transform_response is None:
+                    _pre_transform_response = _pre_communication_response
+        except Exception as exc:
+            logger.warning("communication layer rewrite failed: %s", exc)
+
     # Extract reasoning from the CURRENT turn only.  Walk backwards
     # but stop at the user message that started this turn — anything
     # earlier is from a prior turn and must not leak into the reasoning
@@ -665,6 +690,8 @@ def finalize_turn(
         "interrupted": interrupted,
         "response_transformed": _response_transformed,
         "pre_transform_response": _pre_transform_response,
+        "communication_layer": _communication_layer,
+        "pre_communication_response": _pre_communication_response,
         "response_previewed": getattr(agent, "_response_was_previewed", False),
         "model": agent.model,
         "provider": agent.provider,
@@ -737,10 +764,12 @@ def finalize_turn(
         _should_review_skills = True
         agent._iters_since_skill = 0
 
-    # External memory provider: sync the completed turn + queue next prefetch.
+    # External memory provider: sync the canonical completed turn + queue next
+    # prefetch. A communication-layer rewrite is delivery-only, so memory sees
+    # the main model's finalized answer instead of the persona-polished copy.
     agent._sync_external_memory_for_turn(
         original_user_message=original_user_message,
-        final_response=final_response,
+        final_response=_pre_communication_response or final_response,
         interrupted=interrupted,
         messages=messages,
     )

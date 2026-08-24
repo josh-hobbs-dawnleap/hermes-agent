@@ -8,6 +8,22 @@ DEFAULT_CONFIG = {
     "model": "",
     "providers": {},
     "fallback_providers": [],
+    # Optional presentation-only final-response rewrite. The main model remains
+    # the canonical reasoning/tool authority; this layer only rewrites delivery
+    # text for persona/conciseness and must fail open to the original answer.
+    "communication_layer": {
+        "enabled": False,
+        "provider": "",
+        "model": "",
+        "fallback_providers": [],
+        "platforms": [],
+        "max_chars": 12000,
+        "max_tokens": 700,
+        "timeout": 45,
+        "temperature": 0.2,
+        "style_context_chars": 2500,
+        "preserve_code_blocks": True,
+    },
     "credential_pool_strategies": {},
     "toolsets": ["hermes-cli"],
     # SQLite journal mode used by every Hermes database opener. WAL is the
