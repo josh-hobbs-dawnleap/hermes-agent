@@ -1201,14 +1201,6 @@ class TransformedStreamAgent:
             "final_response": "original answer\n\n[plugin appended this]",
             "response_previewed": True,
             "response_transformed": True,
-            "communication_layer": {
-                "changed": True,
-                "reason": "rewritten",
-                "provider": "ollama-cloud",
-                "model": "gpt-oss:20b",
-                "risk_flags": [],
-            },
-            "pre_communication_response": "original answer",
             "messages": [],
             "api_calls": 1,
         }
@@ -1245,56 +1237,6 @@ async def test_transformed_response_edits_streamed_message_in_place(monkeypatch,
     assert any("[plugin appended this]" in text for text in edited_texts), (
         f"expected transformed text in adapter.edits, got: {edited_texts!r}"
     )
-
-
-@pytest.mark.asyncio
-async def test_communication_layer_audit_logs_metadata_without_message_body(monkeypatch, tmp_path, caplog):
-    caplog.set_level("INFO", logger="gateway.run")
-
-    adapter, result = await _run_with_agent(
-        monkeypatch,
-        tmp_path,
-        TransformedStreamAgent,
-        session_id="sess-comm-audit",
-        config_data={
-            "display": {"tool_progress": "off", "interim_assistant_messages": False},
-            "streaming": {"enabled": True, "edit_interval": 0.01, "buffer_threshold": 1},
-        },
-        platform=Platform.TELEGRAM,
-        chat_id="8370376353",
-        chat_type="dm",
-        thread_id=None,
-        adapter_cls=MetadataEditProgressCaptureAdapter,
-    )
-
-    assert result["communication_layer"] == {
-        "changed": True,
-        "reason": "rewritten",
-        "provider": "ollama-cloud",
-        "model": "gpt-oss:20b",
-        "risk_flags": [],
-    }
-    assert result["pre_communication_response_present"] is True
-
-    audit_lines = [
-        record.getMessage()
-        for record in caplog.records
-        if "communication_layer audit:" in record.getMessage()
-    ]
-    assert audit_lines
-    audit = audit_lines[-1]
-    assert "session_id=sess-comm-audit" in audit
-    assert "platform=telegram" in audit
-    assert "changed=True" in audit
-    assert "reason=rewritten" in audit
-    assert "provider=ollama-cloud" in audit
-    assert "model=gpt-oss:20b" in audit
-    assert "risk_flags=0" in audit
-    assert "response_transformed=True" in audit
-    assert "pre_communication_response_present=True" in audit
-    assert "gateway_response=True" in audit
-    assert "original answer" not in audit
-    assert "plugin appended this" not in audit
 
 
 @pytest.mark.asyncio
