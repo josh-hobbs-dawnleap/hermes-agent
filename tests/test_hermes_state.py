@@ -80,40 +80,6 @@ def db(tmp_path):
     session_db.close()
 
 
-def test_update_latest_matching_message_content_rewrites_newest_active_row(db):
-    db.create_session("comm-layer-update", source="telegram")
-    first = db.append_message("comm-layer-update", role="assistant", content="raw")
-    newest = db.append_message("comm-layer-update", role="assistant", content="raw")
-
-    assert db.update_latest_matching_message_content(
-        "comm-layer-update",
-        role="assistant",
-        old_content="raw",
-        new_content="rewritten",
-    ) is True
-
-    rows = db._conn.execute(
-        "SELECT id, content FROM messages WHERE session_id = ? ORDER BY id",
-        ("comm-layer-update",),
-    ).fetchall()
-    assert [(row["id"], row["content"]) for row in rows] == [
-        (first, "raw"),
-        (newest, "rewritten"),
-    ]
-
-
-def test_update_latest_matching_message_content_returns_false_without_match(db):
-    db.create_session("comm-layer-miss", source="telegram")
-    db.append_message("comm-layer-miss", role="assistant", content="already final")
-
-    assert db.update_latest_matching_message_content(
-        "comm-layer-miss",
-        role="assistant",
-        old_content="raw",
-        new_content="rewritten",
-    ) is False
-
-
 @pytest.fixture(autouse=True)
 def _no_fts_rebuild_throttle(monkeypatch):
     """Zero the FTS-rebuild inter-chunk throttle for every test in this file.

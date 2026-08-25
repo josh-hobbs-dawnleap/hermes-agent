@@ -8649,46 +8649,6 @@ class SessionDB(SessionSearchMixin, SessionSchemaMixin, SessionPortabilityMixin)
             _do, patience_s=self._TRANSCRIPT_WRITE_PATIENCE_S
         )
 
-    def update_latest_matching_message_content(
-        self,
-        session_id: str,
-        *,
-        role: str,
-        old_content: Any,
-        new_content: Any,
-    ) -> bool:
-        """Rewrite the newest active row matching ``role`` and ``old_content``.
-
-        Used when a response transform runs after the runtime has already
-        flushed the raw assistant row. The update keeps the transcript aligned
-        with what the gateway delivered without appending a duplicate assistant
-        message. Message bodies are compared after the same storage encoding
-        used by append paths, so FTS/content triggers stay on the normal rails.
-        """
-        stored_old = self._encode_content(old_content)
-        stored_new = self._encode_content(new_content)
-        if stored_old == stored_new:
-            return True
-
-        def _do(conn):
-            row = conn.execute(
-                """SELECT id FROM messages
-                   WHERE session_id = ? AND role = ? AND content = ? AND active = 1
-                   ORDER BY id DESC LIMIT 1""",
-                (session_id, role, stored_old),
-            ).fetchone()
-            if row is None:
-                return False
-            conn.execute(
-                "UPDATE messages SET content = ? WHERE id = ?",
-                (stored_new, row["id"]),
-            )
-            return True
-
-        return bool(self._execute_write(
-            _do, patience_s=self._TRANSCRIPT_WRITE_PATIENCE_S
-        ))
-
     def set_latest_matching_message_display_kind(
         self, session_id: str, *, role: str, content: str, display_kind: str,
         display_metadata: Optional[Dict[str, Any]] = None,
