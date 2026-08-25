@@ -1,0 +1,79 @@
+# Durable cross-agent domain ownership policy for Hermes work.
+#
+# This is a soft gate, not a personality constitution. It gives agents, review
+# scripts, Kanban cards, and SOUL/AGENTS.md workflow text a shared artifact for
+# detecting when a change crosses into another agent's lane. Cross-lane work is
+# allowed after the required owner reviews/approves it.
+
+owners:
+  research: Sage
+  implementation: Atlas
+  runtime: Fitz
+  orchestration: Winston
+
+domains:
+  research:
+    owner: Sage
+    description: Research, source synthesis, citations, market/domain reconnaissance.
+    paths:
+      - website/docs/research/**
+      - docs/research/**
+  implementation:
+    owner: Atlas
+    description: Code architecture, implementation, tests, PR/diff quality.
+    paths:
+      - agent/**
+      - docs/domain-ownership.yaml
+      - hermes_cli/**
+      - tools/**
+      - tests/**
+      - apps/desktop/src/**
+      - scripts/**
+  runtime:
+    owner: Fitz
+    description: Sysadmin, Hermes runtime, VPS, gateway, providers, deployment safety.
+    paths:
+      - gateway/**
+      - cron/**
+      - plugins/platforms/**
+      - systemd/**
+      - docker/**
+      - deploy/**
+      - caddy/**
+  orchestration:
+    owner: Winston
+    description: Work routing, Kanban, delegation process, cross-agent handoffs.
+    paths:
+      - kanban/**
+      - tools/async_delegation.py
+      - tools/delegation_tool.py
+
+rules:
+  cross_lane_requires_approval: true
+  approval_marker: "Owner-Approval: <OwnerName>"
+  actor_env: HERMES_AGENT_DOMAIN_OWNER
+  check_command: "scripts/check_domain_ownership.py --changed"
+  workflow:
+    - Set HERMES_AGENT_DOMAIN_OWNER to the active agent name when running review gates.
+    - Run scripts/check_domain_ownership.py --changed before commit on cross-agent work.
+    - If blocked, get a compact owner review and include "Owner-Approval: <OwnerName>" in the handoff, commit message, PR body, or gate input.
+    - Raw ownership violations are review blockers, not proof the change is bad.
+
+communication_layer_rebuild_safety:
+  owner: Fitz
+  invariants:
+    - The communication-layer text delivered to the user is the canonical assistant final message in durable transcript and future context.
+    - Raw pre-communication text is metadata/debug only.
+    - The communication model receives SOUL/personality/style context and speaks as the active agent.
+    - Telegram quote/reply routing metadata must not fork model context from the visible user lane.
+    - Kotak/Ollama cloud routes are cloud-routed; do not fall back to local Kotak inference or local llama3.1:8b.
+
+gateway_admin_model_selection_plan:
+  owner: Fitz
+  status: planned
+  steps:
+    - Expose communication_layer config in the dashboard/desktop model settings API beside the main model selection payload.
+    - Add a labelled secondary picker for communication-layer provider/model, disabled unless communication_layer.enabled is true.
+    - Reuse the existing model catalog endpoint, but mark the selected route as final-response style model, not reasoning model.
+    - Persist through the existing config update path and show the configured provider/model in /api/status or equivalent runtime metadata.
+    - Add UI tests for read, select, disable, and no-main-model mutation regression.

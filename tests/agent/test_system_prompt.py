@@ -194,6 +194,31 @@ def test_build_system_prompt_records_stable_prefix():
     assert prompt[len(agent._cached_system_prompt_static):].startswith("\n\ncontext")
 
 
+def test_system_prompt_exposes_communication_layer_runtime():
+    agent = _make_agent(
+        config={
+            "communication_layer": {
+                "enabled": True,
+                "provider": "ollama-cloud",
+                "model": "gpt-oss:120b",
+            }
+        },
+        model="gpt-5.5",
+        provider="openai-codex",
+    )
+    with (
+        patch("run_agent.load_soul_md", return_value=""),
+        patch("run_agent.build_nous_subscription_prompt", return_value=""),
+        patch("run_agent.build_environment_hints", return_value=""),
+        patch("run_agent.build_context_files_prompt", return_value=""),
+    ):
+        prompt = build_system_prompt(agent)
+
+    assert "Communication layer: enabled" in prompt
+    assert "Communication model: ollama-cloud/gpt-oss:120b" in prompt
+    assert "The final answer may be style-polished by this model" in prompt
+
+
 def test_coding_prompt_preserves_legacy_workspace_order(monkeypatch):
     """The cache split must not reorder the stored coding prompt."""
     import agent.system_prompt as system_prompt

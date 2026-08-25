@@ -1,9 +1,10 @@
 """Optional final-response communication/persona rewrite layer.
 
-The main agent model remains the canonical reasoning/tool authority. This module
-only rewrites the finalized user-facing text for delivery, then fails open to
-the original text if the configured communication model is unavailable or if
-simple preservation guards detect factual drift.
+The main agent model remains the canonical reasoning/tool authority. When this
+layer runs successfully, its text becomes the delivered and canonical assistant
+final message. The raw pre-communication text is retained only as debug metadata
+by the caller. The layer fails open to the original text if the configured
+communication model is unavailable or preservation guards detect factual drift.
 """
 
 from __future__ import annotations
@@ -141,6 +142,25 @@ def _main_runtime(agent: Any) -> dict[str, Any] | None:
     return None
 
 
+def _is_local_ollama_route(route: dict[str, Any]) -> bool:
+    provider = str(route.get("provider") or "").strip().lower()
+    base_url = str(route.get("base_url") or "").strip().lower()
+    model = str(route.get("model") or "").strip().lower()
+
+    if provider in {"ollama-cloud", "ollama-kotak", "ollama-kotak-cloud"}:
+        return False
+    if provider == "ollama" and ":cloud" in model:
+        return False
+    if provider == "ollama" and (
+        not base_url
+        or "127.0.0.1" in base_url
+        or "localhost" in base_url
+        or ":11434" in base_url
+    ):
+        return True
+    return False
+
+
 def _candidate_routes(config: dict[str, Any]) -> list[dict[str, Any]]:
     routes: list[dict[str, Any]] = []
     primary = {
@@ -179,8 +199,9 @@ def _candidate_routes(config: dict[str, Any]) -> list[dict[str, Any]]:
 def rewrite_final_response(agent: Any, final_response: str) -> RewriteResult:
     """Rewrite finalized delivery text through a narrow persona layer.
 
-    The returned text is presentation-only. Callers should keep the original
-    final_response in the canonical conversation transcript.
+    If this returns a changed response, that text is the canonical assistant
+    final message. Callers may retain the original final_response only as debug
+    metadata, never as transcript/session/memory content.
     """
 
     original = str(final_response or "")
@@ -199,7 +220,7 @@ def rewrite_final_response(agent: Any, final_response: str) -> RewriteResult:
     if max_chars > 0 and len(original) > max_chars:
         return RewriteResult(original, reason="too_long")
 
-    routes = _candidate_routes(config)
+    routes = [route for route in _candidate_routes(config) if not _is_local_ollama_route(route)]
     if not routes:
         return RewriteResult(original, reason="missing_model")
 
@@ -213,7 +234,11 @@ def rewrite_final_response(agent: Any, final_response: str) -> RewriteResult:
         "code block, warning, uncertainty level, tool result, and decision. "
         "Do not add new claims. Do not remove blockers, approvals, failed/verified "
         "language, security warnings, or file-mutation warnings. Keep it concise. "
-        "If the answer contains code blocks, preserve them exactly. Return only the rewritten answer."
+        "If the answer contains code blocks, preserve them exactly. "
+        "Speak as the active agent, in first person, using the SOUL/personality/style "
+        "context below. Do not paraphrase, summarize, or narrate the answer as a third "
+        "party describing what the agent said; write it directly as the agent's own "
+        "reply, not on behalf of the agent. Return only the rewritten answer."
     )
     user = (
         "Agent style context:\n"
