@@ -154,6 +154,8 @@ def _is_local_ollama_route(route: dict[str, Any]) -> bool:
 
     if provider == "ollama-cloud":
         return False
+    if provider in {"ollama-kotak", "ollama-kotak-cloud"}:
+        return not _is_cloud_ollama_model(model)
     if provider == "ollama" and _is_cloud_ollama_model(model):
         return False
     if provider == "ollama" and (
