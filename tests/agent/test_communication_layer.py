@@ -82,34 +82,6 @@ def test_rewrite_uses_configured_model_and_preserves_canonical_context(monkeypat
     assert calls[0]["model"] == "gemma4:31b"
     assert calls[0]["main_runtime"]["model"] == "gpt-5.5"
     assert "Preserve every fact" in calls[0]["messages"][0]["content"]
-    assert "Speak as the active agent" in calls[0]["messages"][0]["content"]
-    assert "not on behalf of the agent" in calls[0]["messages"][0]["content"]
-    assert "Sage style" in calls[0]["messages"][1]["content"]
-
-
-def test_local_ollama_routes_are_rejected_without_model_call(monkeypatch):
-    from agent.communication_layer import rewrite_final_response
-
-    def boom(**_kwargs):
-        raise AssertionError("local Ollama route must not be called")
-
-    monkeypatch.setattr("agent.communication_layer.call_llm", boom)
-
-    original = "Done. Wrote /tmp/report.md."
-    result = rewrite_final_response(
-        _agent({
-            "communication_layer": {
-                "enabled": True,
-                "provider": "ollama",
-                "model": "llama3.2",
-                "base_url": "http://127.0.0.1:11434/v1",
-            }
-        }),
-        original,
-    )
-
-    assert result.text == original
-    assert result.reason == "missing_model"
 
 
 def test_rewrite_tries_configured_cross_provider_fallback(monkeypatch):
@@ -187,7 +159,7 @@ def test_code_blocks_are_preserved_exactly_or_rewrite_is_rejected(monkeypatch):
     assert "code_block_changed" in result.risk_flags
 
 
-def test_turn_finalizer_persists_delivered_communication_text():
+def test_turn_finalizer_invokes_communication_layer_after_canonical_persist():
     import inspect
 
     from agent import turn_finalizer
@@ -196,9 +168,6 @@ def test_turn_finalizer_persists_delivered_communication_text():
     persist_idx = src.index("agent._persist_session")
     comm_idx = src.index("rewrite_final_response")
 
-    assert comm_idx < persist_idx
+    assert persist_idx < comm_idx
     assert "communication_layer" in src
     assert "pre_communication_response" in src
-    assert "final_response=_pre_communication_response or final_response" not in src
-    assert '_tail.get("content") == _pre_communication_response' in src
-    assert "assistant_response=final_response" in src

@@ -8,11 +8,9 @@ DEFAULT_CONFIG = {
     "model": "",
     "providers": {},
     "fallback_providers": [],
-    # Optional final-response communication/persona layer. The main model
-    # remains the canonical reasoning/tool authority, but a successful rewrite
-    # becomes the canonical delivered assistant content for transcript,
-    # persistence, memory, and future context. The raw pre-communication answer
-    # is debug metadata only; failures still open to the original answer.
+    # Optional presentation-only final-response rewrite. The main model remains
+    # the canonical reasoning/tool authority; this layer only rewrites delivery
+    # text for persona/conciseness and must fail open to the original answer.
     "communication_layer": {
         "enabled": False,
         "provider": "",

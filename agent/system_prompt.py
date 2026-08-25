@@ -788,26 +788,6 @@ def build_system_prompt_parts(agent: Any, system_message: Optional[str] = None) 
         timestamp_line += f"\nPlatform: {agent.platform}"
     volatile_parts.append(timestamp_line)
 
-    # Communication layer runtime hint: lets the model know a persona/style
-    # rewrite may sit between its answer and the user, so it doesn't need to
-    # over-explain tone, and so any surfaced runtime/session metadata about
-    # "what model answered" accounts for the rewrite stage too.
-    _comm_cfg = getattr(agent, "config", None) or {}
-    if isinstance(_comm_cfg, dict):
-        _comm_cfg = _comm_cfg.get("communication_layer") or _comm_cfg.get("communication") or {}
-    if isinstance(_comm_cfg, dict) and is_truthy_value(_comm_cfg.get("enabled")):
-        comm_line = "Communication layer: enabled"
-        _comm_provider = str(_comm_cfg.get("provider") or "").strip()
-        _comm_model = str(_comm_cfg.get("model") or "").strip()
-        if _comm_provider and _comm_model:
-            comm_line += f"\nCommunication model: {_comm_provider}/{_comm_model}"
-        comm_line += (
-            "\nThe final answer may be style-polished by this model before delivery. "
-            "It must speak as you, in first person — not paraphrase or narrate your "
-            "answer as a third party."
-        )
-        volatile_parts.append(comm_line)
-
     return {
         "stable":   "\n\n".join(p.strip() for p in stable_parts   if p and p.strip()),
         "context":  "\n\n".join(p.strip() for p in context_parts  if p and p.strip()),
