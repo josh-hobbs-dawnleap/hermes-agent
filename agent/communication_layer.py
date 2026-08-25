@@ -47,6 +47,18 @@ _WARNING_TERMS = (
     "secret",
     "credential",
 )
+_PUNCT_EQUIVALENTS = str.maketrans({
+    "‑": "-",
+    "‐": "-",
+    "‒": "-",
+    "–": "-",
+    "—": "-",
+    "−": "-",
+    "“": '"',
+    "”": '"',
+    "‘": "'",
+    "’": "'",
+})
 
 
 def _cfg_enabled(raw: Any) -> bool:
@@ -103,6 +115,11 @@ def _literal_requirements(text: str) -> list[str]:
 
 def _code_blocks(text: str) -> list[str]:
     return [m.group(0) for m in _CODE_BLOCK_RE.finditer(text or "")]
+
+
+def _semantic_change_key(text: str) -> str:
+    """Collapse cosmetic Unicode/spacing differences for rewrite decisions."""
+    return " ".join(str(text or "").translate(_PUNCT_EQUIVALENTS).split())
 
 
 def _guard_rewrite(original: str, rewritten: str, *, preserve_code_blocks: bool = True) -> list[str]:
@@ -248,6 +265,9 @@ def rewrite_final_response(agent: Any, final_response: str) -> RewriteResult:
         "code block, warning, uncertainty level, tool result, and decision. "
         "Do not add new claims. Do not remove blockers, approvals, failed/verified "
         "language, security warnings, or file-mutation warnings. Keep it concise. "
+        "Do not add generic AI polish, theatrical metaphors, corporate cheer, or clever "
+        "banter that was not already serving the active agent's style. For tiny greetings "
+        "or low-substance turns, prefer a small human answer over an ornate rewrite. "
         "If the answer contains code blocks, preserve them exactly. "
         "Speak as the active agent, in first person, using the SOUL/personality/style "
         "context below. Do not paraphrase, summarize, or narrate the answer as a third "
@@ -313,10 +333,11 @@ def rewrite_final_response(agent: Any, final_response: str) -> RewriteResult:
                 risk_flags=risk_flags,
             )
 
+        changed = rewritten != original and _semantic_change_key(rewritten) != _semantic_change_key(original)
         return RewriteResult(
-            rewritten,
-            changed=rewritten != original,
-            reason="rewritten" if rewritten != original else "unchanged",
+            rewritten if changed else original,
+            changed=changed,
+            reason="rewritten" if changed else "unchanged",
             provider=provider,
             model=model,
         )

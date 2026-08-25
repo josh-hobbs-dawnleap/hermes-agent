@@ -463,9 +463,36 @@ def finalize_turn(
                 # tail before persistence so /resume, memory, future context,
                 # and gateway quote/reply surfaces never split-brain against
                 # what the user actually received.
+                _already_persisted = bool(_tail.get("_db_persisted"))
+                if _already_persisted:
+                    _session_db = getattr(agent, "_session_db", None)
+                    _update_latest = getattr(
+                        _session_db,
+                        "update_latest_matching_message_content",
+                        None,
+                    )
+                    if callable(_update_latest):
+                        try:
+                            _update_latest(
+                                getattr(agent, "session_id", None),
+                                role="assistant",
+                                old_content=_pre_communication_response,
+                                new_content=final_response,
+                            )
+                        except Exception:
+                            logger.warning(
+                                "failed to update persisted communication-layer assistant row",
+                                exc_info=True,
+                            )
+                    else:
+                        logger.warning(
+                            "communication layer transformed an already-persisted assistant row, "
+                            "but the session DB cannot update it in place"
+                        )
                 _tail["content"] = final_response
-                _tail.pop("_db_persisted", None)
-                agent._db_flush_scan_prefix = None
+                if not _already_persisted:
+                    _tail.pop("_db_persisted", None)
+                    agent._db_flush_scan_prefix = None
             elif isinstance(_tail, dict) and _tail.get("content") != final_response and _is_pure_tool_call_tail(_tail):
                 # The tail IS an assistant row, but a *pure tool-call turn*:
                 # tool_calls with no text of its own. The role check alone

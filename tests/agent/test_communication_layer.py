@@ -284,6 +284,26 @@ def test_code_blocks_are_preserved_exactly_or_rewrite_is_rejected(monkeypatch):
     assert "code_block_changed" in result.risk_flags
 
 
+def test_cosmetic_unicode_punctuation_rewrite_is_treated_as_unchanged(monkeypatch):
+    from agent.communication_layer import rewrite_final_response
+
+    original = "Spreadsheet-shaped crime scene."
+
+    def fake_call_llm(**_kwargs):
+        return _Response("Spreadsheet‑shaped crime scene.")
+
+    monkeypatch.setattr("agent.communication_layer.call_llm", fake_call_llm)
+
+    result = rewrite_final_response(
+        _agent({"communication_layer": {"enabled": True, "provider": "ollama-cloud", "model": "gemma4:31b"}}),
+        original,
+    )
+
+    assert result.text == original
+    assert result.changed is False
+    assert result.reason == "unchanged"
+
+
 def test_turn_finalizer_persists_delivered_communication_text():
     import inspect
 
@@ -298,4 +318,5 @@ def test_turn_finalizer_persists_delivered_communication_text():
     assert "pre_communication_response" in src
     assert "final_response=_pre_communication_response or final_response" not in src
     assert '_tail.get("content") == _pre_communication_response' in src
+    assert "update_latest_matching_message_content" in src
     assert "assistant_response=final_response" in src
