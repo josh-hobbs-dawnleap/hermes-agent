@@ -87,43 +87,6 @@ def test_rewrite_uses_configured_model_and_preserves_canonical_context(monkeypat
     assert "Sage style" in calls[0]["messages"][1]["content"]
 
 
-def test_rewrite_loads_runtime_config_when_agent_has_no_config_attr(monkeypatch):
-    from agent.communication_layer import rewrite_final_response
-
-    calls = []
-
-    def fake_call_llm(**kwargs):
-        calls.append(kwargs)
-        return _Response("Done. Report is at /tmp/report.md.")
-
-    monkeypatch.setattr("agent.communication_layer.call_llm", fake_call_llm)
-    monkeypatch.setattr(
-        "hermes_cli.config.load_config_readonly",
-        lambda: {
-            "communication_layer": {
-                "enabled": True,
-                "provider": "ollama-cloud",
-                "model": "gpt-oss:20b",
-            }
-        },
-    )
-
-    agent = SimpleNamespace(
-        platform="telegram",
-        soul_content="Winston style: concise, dry wit.",
-        _current_main_runtime=lambda: None,
-    )
-    original = "The report is at /tmp/report.md."
-
-    result = rewrite_final_response(agent, original)
-
-    assert result.text == "Done. Report is at /tmp/report.md."
-    assert result.changed is True
-    assert result.reason == "rewritten"
-    assert calls[0]["provider"] == "ollama-cloud"
-    assert calls[0]["model"] == "gpt-oss:20b"
-
-
 def test_local_ollama_routes_are_rejected_without_model_call(monkeypatch):
     from agent.communication_layer import rewrite_final_response
 

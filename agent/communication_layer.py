@@ -58,16 +58,7 @@ def _cfg_enabled(raw: Any) -> bool:
 
 
 def _communication_config(agent: Any) -> dict[str, Any]:
-    cfg = getattr(agent, "config", None)
-    if cfg is None:
-        try:
-            from hermes_cli.config import load_config_readonly
-
-            cfg = load_config_readonly() or {}
-        except Exception:
-            cfg = {}
-    if not isinstance(cfg, dict):
-        return {}
+    cfg = getattr(agent, "config", None) or {}
     raw = cfg.get("communication_layer") or cfg.get("communication") or {}
     return raw if isinstance(raw, dict) else {}
 
