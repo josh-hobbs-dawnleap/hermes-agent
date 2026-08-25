@@ -6376,6 +6376,11 @@ class TurnRunner:
             "session_id": effective_session_id,
             "response_previewed": result.get("response_previewed", False),
             "response_transformed": result.get("response_transformed", False),
+            "communication_layer": result.get("communication_layer"),
+            # Presence-only breadcrumb for observability. The raw
+            # pre-communication text must not be exposed to gateway/platform
+            # send paths or logs.
+            "pre_communication_response_present": bool(result.get("pre_communication_response")),
             # Pass through the agent_persisted flag so the persistence block
             # above can correctly determine whether the codex app-server path
             # self-persisted (it didn't — see codex_runtime.py).  Default
@@ -28935,6 +28940,30 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
         # at silence.  (#10xxx — "agent stops after web search")
         _sc = stream_consumer_holder[0]
         if isinstance(response, dict) and not response.get("failed"):
+            _comm_meta = response.get("communication_layer")
+            if isinstance(_comm_meta, dict):
+                try:
+                    _risk_flags = _comm_meta.get("risk_flags")
+                    _risk_count = len(_risk_flags) if isinstance(_risk_flags, list) else 0
+                    _profile = self._active_profile_name() if hasattr(self, "_active_profile_name") else "default"
+                    logger.info(
+                        "communication_layer audit: session_id=%s platform=%s profile=%s "
+                        "changed=%s reason=%s provider=%s model=%s risk_flags=%s "
+                        "response_transformed=%s pre_communication_response_present=%s gateway_response=%s",
+                        response.get("session_id") or session_id or "?",
+                        getattr(source.platform, "value", source.platform),
+                        _profile,
+                        bool(_comm_meta.get("changed")),
+                        _comm_meta.get("reason") or "",
+                        _comm_meta.get("provider") or "",
+                        _comm_meta.get("model") or "",
+                        _risk_count,
+                        bool(response.get("response_transformed")),
+                        bool(response.get("pre_communication_response_present")),
+                        True,
+                    )
+                except Exception:
+                    logger.debug("communication_layer audit logging failed", exc_info=True)
             _final = response.get("final_response") or ""
             _is_empty_sentinel = not _final or _final == "(empty)"
             # response_previewed means the interim_assistant_callback already
