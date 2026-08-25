@@ -142,14 +142,21 @@ def _main_runtime(agent: Any) -> dict[str, Any] | None:
     return None
 
 
+def _is_cloud_ollama_model(model: str) -> bool:
+    normalized = str(model or "").strip().lower()
+    return normalized.endswith(":cloud") or normalized.endswith("-cloud")
+
+
 def _is_local_ollama_route(route: dict[str, Any]) -> bool:
     provider = str(route.get("provider") or "").strip().lower()
     base_url = str(route.get("base_url") or "").strip().lower()
     model = str(route.get("model") or "").strip().lower()
 
-    if provider in {"ollama-cloud", "ollama-kotak", "ollama-kotak-cloud"}:
+    if provider == "ollama-cloud":
         return False
-    if provider == "ollama" and ":cloud" in model:
+    if provider in {"ollama-kotak", "ollama-kotak-cloud"}:
+        return not _is_cloud_ollama_model(model)
+    if provider == "ollama" and _is_cloud_ollama_model(model):
         return False
     if provider == "ollama" and (
         not base_url

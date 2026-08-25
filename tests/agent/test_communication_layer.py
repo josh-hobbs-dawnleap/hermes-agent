@@ -112,6 +112,61 @@ def test_local_ollama_routes_are_rejected_without_model_call(monkeypatch):
     assert result.reason == "missing_model"
 
 
+def test_kotak_non_cloud_model_is_rejected_without_model_call(monkeypatch):
+    from agent.communication_layer import rewrite_final_response
+
+    def boom(**_kwargs):
+        raise AssertionError("local Kotak inference route must not be called")
+
+    monkeypatch.setattr("agent.communication_layer.call_llm", boom)
+
+    original = "Done. Wrote /tmp/report.md."
+    result = rewrite_final_response(
+        _agent({
+            "communication_layer": {
+                "enabled": True,
+                "provider": "ollama-kotak",
+                "model": "llama3.1:8b",
+                "base_url": "http://100.74.121.4:11434/v1",
+            }
+        }),
+        original,
+    )
+
+    assert result.text == original
+    assert result.reason == "missing_model"
+
+
+def test_kotak_cloud_model_suffix_is_allowed(monkeypatch):
+    from agent.communication_layer import rewrite_final_response
+
+    calls = []
+
+    def fake_call_llm(**kwargs):
+        calls.append(kwargs)
+        return _Response("Done. Wrote /tmp/report.md.")
+
+    monkeypatch.setattr("agent.communication_layer.call_llm", fake_call_llm)
+
+    original = "Done. Wrote /tmp/report.md."
+    result = rewrite_final_response(
+        _agent({
+            "communication_layer": {
+                "enabled": True,
+                "provider": "ollama-kotak",
+                "model": "gemma4:31b-cloud",
+                "base_url": "http://100.74.121.4:11434/v1",
+            }
+        }),
+        original,
+    )
+
+    assert result.text == original
+    assert result.reason == "unchanged"
+    assert calls[0]["provider"] == "ollama-kotak"
+    assert calls[0]["model"] == "gemma4:31b-cloud"
+
+
 def test_rewrite_tries_configured_cross_provider_fallback(monkeypatch):
     from agent.communication_layer import rewrite_final_response
 
